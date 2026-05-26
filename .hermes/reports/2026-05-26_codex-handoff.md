@@ -145,3 +145,82 @@ Invoke-RestMethod -Uri http://127.0.0.1:8765/health
 ## Observacao critica
 
 Nao faz sentido otimizar OCR ou melhorar overlay agora sem fechar primeiro o health real. O proximo bloqueio nao e codigo da extensao; e confirmar a cadeia externa: LibreTranslate, Tesseract e EasyOCR.
+
+---
+
+## Atualizacao - validacao de health
+
+Entrada recebida:
+
+```json
+{
+  "bridge": { "ok": true },
+  "libretranslate": { "ok": false, "url": "http://127.0.0.1:5000" },
+  "ocr": {
+    "easyocr": { "installed": false },
+    "tesseract": { "installed": false }
+  }
+}
+```
+
+Diagnostico:
+
+- O erro do LibreTranslate era processo ausente em `127.0.0.1:5000`, nao bug do bridge.
+- `docker` nao esta disponivel no PATH, entao `LibreTranslate-1.9.5/run.bat` nao e o melhor caminho local agora.
+- A pasta `LibreTranslate-1.9.5/.venv` existe e ja tem `libretranslate` instalado.
+- Modelos Argos instalados encontrados:
+  - `en -> ja`
+  - `en -> ko`
+  - `en -> pt`
+  - `en -> pb`
+  - `en -> zh`
+  - reversos correspondentes
+- `tesseract` nao esta disponivel no PATH.
+- `easyocr` e `pytesseract` nao estao instalados em `hq-ocr-translator/bridge/.venv`.
+
+Acao executada:
+
+- Iniciado LibreTranslate a partir do `.venv` local:
+
+```powershell
+cd "C:\Users\GADEIM\Documents\Tradutor OCR extensao\LibreTranslate-1.9.5"
+.\.venv\Scripts\python.exe main.py --host 127.0.0.1 --port 5000 --disable-web-ui --threads 1
+```
+
+- Iniciado o bridge em `127.0.0.1:8765`.
+
+Health atualizado:
+
+```json
+{
+  "bridge": { "ok": true },
+  "libretranslate": {
+    "ok": true,
+    "url": "http://127.0.0.1:5000",
+    "languages": ["en", "zh-Hans", "ja", "ko", "pt", "pt-BR"]
+  },
+  "ocr": {
+    "easyocr": {
+      "installed": false,
+      "language": "en",
+      "downloadEnabled": false
+    },
+    "tesseract": {
+      "installed": false,
+      "language": "eng"
+    }
+  }
+}
+```
+
+Estado apos atualizacao:
+
+- Bridge: OK.
+- LibreTranslate: OK.
+- OCR: bloqueado.
+
+Proxima decisao:
+
+- Instalar `easyocr` e `pytesseract` no `.venv` do bridge.
+- Instalar Tesseract OCR no Windows ou aceitar EasyOCR como primeiro OCR real.
+- Definir se EasyOCR pode baixar modelos automaticamente (`HQ_OCR_ALLOW_EASYOCR_DOWNLOAD=true`) ou se modelos serao baixados/preparados manualmente.
