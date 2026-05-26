@@ -75,3 +75,5 @@ pytest
 ```
 
 Os testes principais usam OCR e tradutor falsos. O smoke test de OCR real deve ser feito manualmente depois que Tesseract/EasyOCR estiverem instalados.
+
+Setup detalhado para desenvolvimento: `docs/dev-setup.md`.
