@@ -224,3 +224,99 @@ Proxima decisao:
 - Instalar `easyocr` e `pytesseract` no `.venv` do bridge.
 - Instalar Tesseract OCR no Windows ou aceitar EasyOCR como primeiro OCR real.
 - Definir se EasyOCR pode baixar modelos automaticamente (`HQ_OCR_ALLOW_EASYOCR_DOWNLOAD=true`) ou se modelos serao baixados/preparados manualmente.
+
+---
+
+## Atualizacao - OCR real confirmado com EasyOCR
+
+Entrada recebida:
+
+```json
+{
+  "bridge": { "ok": true },
+  "libretranslate": {
+    "languages": ["en", "zh-Hans", "ja", "ko", "pt", "pt-BR"],
+    "ok": true,
+    "url": "http://127.0.0.1:5000"
+  },
+  "ocr": {
+    "easyocr": {
+      "downloadEnabled": false,
+      "installed": true,
+      "language": "en",
+      "modelDirectory": null,
+      "modelDirectoryExists": false
+    },
+    "tesseract": {
+      "error": "tesseract is not installed or it's not in your PATH. See README file for more information.",
+      "installed": false,
+      "language": "eng"
+    }
+  }
+}
+```
+
+Validacao de pacotes no `.venv` do bridge:
+
+- `easyocr`: instalado, versao `1.7.2`.
+- `pytesseract`: instalado, versao `0.3.13`.
+- `torch`: instalado, versao `2.12.0`.
+- `torchvision`: instalado, versao `0.27.0`.
+- `opencv-python-headless`: instalado, versao `4.13.0.92`.
+
+Tesseract:
+
+- `pytesseract` esta instalado.
+- O binario `tesseract` do Windows nao esta no PATH.
+- Decisao operacional atual: Tesseract fica fora do marco de OCR inicial; EasyOCR e o primeiro caminho confirmado.
+
+Smoke test executado:
+
+- Gerada imagem PNG em memoria com texto `HELLO WORLD`.
+- Chamada real ao endpoint:
+
+```http
+POST http://127.0.0.1:8765/v1/translate-selection
+```
+
+Payload relevante:
+
+```json
+{
+  "source": "en",
+  "target": "pt",
+  "engines": ["easyocr"]
+}
+```
+
+Resposta objetiva:
+
+```json
+{
+  "engineResults": [
+    {
+      "engine": "easyocr",
+      "rawConfidence": 0.9983,
+      "score": 0.8712,
+      "text": "HELLO WORLD"
+    }
+  ],
+  "sourceText": "HELLO WORLD",
+  "translatedText": "OLÁ MUNDO",
+  "warnings": []
+}
+```
+
+Conclusao:
+
+- Bridge operacional: sim.
+- LibreTranslate operacional: sim.
+- EasyOCR operacional: sim.
+- OCR real retornando texto: sim.
+- Traducao apos OCR: sim.
+- Gargalo seguinte deixou de ser setup basico de OCR e passou a ser qualidade/robustez em imagens reais de HQ.
+
+Observacao tecnica:
+
+- `downloadEnabled=false` no health nao impediu o smoke test, o que indica que os modelos necessarios do EasyOCR ja estao disponiveis no local padrao usado pela biblioteca.
+- O health atual ainda nao mostra esse diretorio padrao de modelos; isso pode ser melhorado depois como observabilidade.
