@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HQ OCR Translator - Opcoes</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <h1>HQ OCR Translator</h1>
+      <form id="optionsForm">
+        <label>
+          Bridge URL
+          <input id="bridgeUrl" type="url" required>
+        </label>
+        <div class="grid">
+          <label>
+            Origem
+            <input id="source" type="text" maxlength="8" required>
+          </label>
+          <label>
+            Destino
+            <input id="target" type="text" maxlength="8" required>
+          </label>
+        </div>
+        <fieldset>
+          <legend>OCR</legend>
+          <label class="check">
+            <input id="engineEasyocr" type="checkbox" value="easyocr">
+            EasyOCR
+          </label>
+          <label class="check">
+            <input id="engineTesseract" type="checkbox" value="tesseract">
+            Tesseract
+          </label>
+        </fieldset>
+        <div class="actions">
+          <button id="save" type="submit">Salvar</button>
+          <button id="health" type="button">Verificar bridge</button>
+        </div>
+        <p id="status"></p>
+      </form>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
