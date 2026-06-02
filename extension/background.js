@@ -1,13 +1,19 @@
 const DEFAULT_CONFIG = {
   bridgeUrl: "http://127.0.0.1:8765",
   source: "en",
-  target: "pt",
-  engines: ["easyocr", "tesseract"]
+  target: "pt-BR",
+  engines: ["paddleocr", "easyocr"],
+  debugCaptures: false
 };
+const LEGACY_DEFAULT_ENGINES = ["easyocr", "tesseract"];
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.sync.get(DEFAULT_CONFIG);
-  await chrome.storage.sync.set({ ...DEFAULT_CONFIG, ...current });
+  await chrome.storage.sync.set({
+    ...DEFAULT_CONFIG,
+    ...current,
+    engines: normalizeEngines(current.engines)
+  });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -86,7 +92,8 @@ async function translateSelection(tab, selection, viewport) {
       viewport,
       source: config.source,
       target: config.target,
-      engines: config.engines
+      engines: config.engines,
+      debug: config.debugCaptures
     })
   });
   const payload = await response.json().catch(() => ({}));
@@ -104,15 +111,14 @@ async function translateSelection(tab, selection, viewport) {
 
 async function getConfig() {
   const config = await chrome.storage.sync.get(DEFAULT_CONFIG);
-  const engines = Array.isArray(config.engines) && config.engines.length
-    ? config.engines
-    : DEFAULT_CONFIG.engines;
+  const engines = normalizeEngines(config.engines);
 
   return {
     bridgeUrl: config.bridgeUrl || DEFAULT_CONFIG.bridgeUrl,
     source: config.source || DEFAULT_CONFIG.source,
-    target: config.target || DEFAULT_CONFIG.target,
-    engines
+    target: normalizeLanguageCode(config.target || DEFAULT_CONFIG.target),
+    engines,
+    debugCaptures: Boolean(config.debugCaptures)
   };
 }
 
@@ -122,6 +128,27 @@ async function sendToTab(tabId, payload) {
 
 function trimSlash(value) {
   return String(value || "").replace(/\/+$/, "");
+}
+
+function normalizeLanguageCode(value) {
+  const trimmed = String(value || "").trim();
+  return trimmed.toLowerCase() === "pt" || trimmed.toLowerCase() === "pt-br"
+    ? "pt-BR"
+    : trimmed.toLowerCase();
+}
+
+function normalizeEngines(value) {
+  const engines = Array.isArray(value)
+    ? value.filter((engine) => ["paddleocr", "easyocr", "tesseract"].includes(engine))
+    : [];
+  if (!engines.length || sameEngines(engines, LEGACY_DEFAULT_ENGINES)) {
+    return DEFAULT_CONFIG.engines;
+  }
+  return engines;
+}
+
+function sameEngines(left, right) {
+  return left.length === right.length && left.every((engine, index) => engine === right[index]);
 }
 
 function sleep(ms) {

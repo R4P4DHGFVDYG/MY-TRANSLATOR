@@ -5,9 +5,11 @@ from typing import Any
 from flask import Flask, jsonify, request
 
 from .config import BridgeConfig
+from .debug_capture import DebugCapture, debug_capture_requested
 from .image_utils import crop_visible_selection, image_from_data_url
 from .libretranslate import LibreTranslateClient
 from .ocr import DEFAULT_ENGINES, OcrService
+from .translation_text import prepare_text_for_translation
 
 
 def create_app(
@@ -30,11 +32,17 @@ def create_app(
 
     @app.get("/health")
     def health():
+        translation_health = translator_client.health()
         return jsonify(
             {
                 "bridge": {"ok": True},
-                "libretranslate": translator_client.health(),
+                "translation": translation_health,
+                "libretranslate": translation_health.get("libretranslate", {}),
                 "ocr": ocr.health_checks(),
+                "debug": {
+                    "saveCaptures": bridge_config.save_debug_captures,
+                    "captureDirectory": bridge_config.debug_capture_dir,
+                },
             }
         )
 
@@ -58,10 +66,24 @@ def create_app(
         if not isinstance(engines, list):
             return _error("engines must be a list", 400)
 
-        source = str(payload.get("source") or "en").lower()
-        target = str(payload.get("target") or "pt").lower()
+        source = _language_code(payload.get("source") or "en")
+        target = _language_code(payload.get("target") or "pt-BR")
+
+        debug_capture: DebugCapture | None = None
+        if debug_capture_requested(bridge_config, payload):
+            try:
+                debug_capture = DebugCapture(bridge_config, payload, crop, crop_meta)
+            except OSError as exc:
+                debug_capture = None
+                debug_warning = f"debug capture failed: {exc}"
+            else:
+                debug_warning = ""
+        else:
+            debug_warning = ""
 
         best, engine_results, warnings = ocr.detect_text(crop, engines)
+        if debug_warning:
+            warnings = [*warnings, debug_warning]
         response_base: dict[str, Any] = {
             "sourceText": best.text if best else "",
             "translatedText": "",
@@ -69,21 +91,41 @@ def create_app(
             "warnings": warnings,
             "crop": crop_meta,
         }
+        if debug_capture:
+            response_base["debugCapture"] = debug_capture.to_dict()
 
         if best is None or not best.text:
             response_base["warnings"] = [*warnings, "No OCR text detected"]
+            if debug_capture:
+                debug_capture.save_response(response_base)
             return jsonify(response_base)
 
         try:
+            translation_source_text = prepare_text_for_translation(best.text)
             response_base["translatedText"] = translator_client.translate(
-                best.text,
+                translation_source_text,
                 source=source,
                 target=target,
             )
+            if translation_source_text != best.text:
+                response_base["translationSourceText"] = translation_source_text
+            translation_provider = getattr(translator_client, "last_provider", None)
+            if translation_provider:
+                response_base["translationProvider"] = translation_provider
+            translation_warnings = getattr(translator_client, "last_warnings", [])
+            if translation_warnings:
+                response_base["warnings"] = [
+                    *response_base["warnings"],
+                    "translation fallback: " + "; ".join(translation_warnings),
+                ]
         except RuntimeError as exc:
             response_base["error"] = str(exc)
+            if debug_capture:
+                debug_capture.save_response(response_base, 502)
             return jsonify(response_base), 502
 
+        if debug_capture:
+            debug_capture.save_response(response_base)
         return jsonify(response_base)
 
     return app
@@ -99,3 +141,8 @@ def _dict_field(payload: dict[str, Any], key: str) -> dict[str, Any]:
 
 def _error(message: str, status_code: int):
     return jsonify({"error": message}), status_code
+
+
+def _language_code(value: Any) -> str:
+    code = str(value).strip()
+    return "pt-BR" if code.lower() in {"pt", "pt-br"} else code.lower()

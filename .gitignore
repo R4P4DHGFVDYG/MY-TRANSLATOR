@@ -1,7 +1,15 @@
+debug-captures/
+bridge/debug-captures/
+.venv/
+bridge/.venv/
+bridge/.paddlex-cache/
+.hermes/
+exemplos do OCR/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.venv/
+.pytest-tmp/
+bridge/.pytest-tmp/
 node_modules/
 dist/
 build/

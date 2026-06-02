@@ -6,7 +6,11 @@ from io import BytesIO
 from PIL import Image
 import pytest
 
-from hq_ocr_bridge.image_utils import crop_visible_selection, image_from_data_url
+from hq_ocr_bridge.image_utils import (
+    crop_visible_selection,
+    image_from_data_url,
+    preprocess_variants_for_ocr,
+)
 
 
 def test_crop_scales_selection_from_viewport_to_screenshot_pixels():
@@ -39,3 +43,13 @@ def test_data_url_loader_accepts_png_data_url():
     decoded = image_from_data_url(f"data:image/png;base64,{data}")
 
     assert decoded.size == (4, 3)
+
+
+def test_preprocess_variants_include_standard_soft_and_binary():
+    image = Image.new("RGB", (120, 40), "white")
+
+    variants = preprocess_variants_for_ocr(image)
+    names = [name for name, _ in variants]
+
+    assert names == ["standard", "soft", "binary"]
+    assert all(variant.width >= image.width for _, variant in variants)

@@ -45,6 +45,16 @@ Health:
 Invoke-RestMethod -Uri http://127.0.0.1:8765/health
 ```
 
+Salvar recortes de diagnostico em todas as chamadas:
+
+```powershell
+$env:HQ_OCR_SAVE_DEBUG_CAPTURES = "true"
+$env:HQ_OCR_DEBUG_CAPTURE_DIR = "debug-captures"
+.\.venv\Scripts\python.exe -m hq_ocr_bridge
+```
+
+Tambem da para ativar por chamada marcando "Salvar recortes OCR" nas opcoes da extensao.
+
 ## LibreTranslate
 
 O bridge espera LibreTranslate em:

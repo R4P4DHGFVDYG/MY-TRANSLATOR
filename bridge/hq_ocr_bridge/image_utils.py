@@ -68,19 +68,33 @@ def crop_visible_selection(
 
 
 def preprocess_for_ocr(image: Image.Image) -> Image.Image:
+    return preprocess_variants_for_ocr(image)[0][1]
+
+
+def preprocess_variants_for_ocr(image: Image.Image) -> list[tuple[str, Image.Image]]:
     gray = ImageOps.grayscale(image)
     normalized = ImageOps.autocontrast(gray)
-    sharpened = normalized.filter(ImageFilter.SHARPEN)
+    standard = _upscale_for_ocr(normalized.filter(ImageFilter.SHARPEN))
+    soft = _upscale_for_ocr(normalized)
+    binary = standard.point(lambda pixel: 255 if pixel > 170 else 0)
 
-    if sharpened.width < 900:
-        scale = min(3, max(2, round(900 / max(sharpened.width, 1))))
+    return [
+        ("standard", standard),
+        ("soft", soft),
+        ("binary", binary),
+    ]
+
+
+def _upscale_for_ocr(image: Image.Image) -> Image.Image:
+    if image.width < 900:
+        scale = min(3, max(2, round(900 / max(image.width, 1))))
         resampling = getattr(Image, "Resampling", Image).LANCZOS
-        sharpened = sharpened.resize(
-            (sharpened.width * scale, sharpened.height * scale),
+        image = image.resize(
+            (image.width * scale, image.height * scale),
             resampling,
         )
 
-    return sharpened
+    return image
 
 
 def _float_value(data: dict[str, Any], key: str) -> float:
