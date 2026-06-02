@@ -16,7 +16,7 @@
   "commands": {
     "start-selection": {
       "suggested_key": {
-        "default": "Alt+Shift+O"
+        "default": "Alt+Q"
       },
       "description": "Selecionar area para OCR"
     }
