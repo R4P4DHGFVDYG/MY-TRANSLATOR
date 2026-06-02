@@ -16,6 +16,14 @@ chrome.runtime.onInstalled.addListener(async () => {
   });
 });
 
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "start-selection") {
+    startSelection().catch(() => {
+      // Shortcut errors cannot be returned to the popup UI.
+    });
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {
     return false;

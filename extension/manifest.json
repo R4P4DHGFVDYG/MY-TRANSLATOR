@@ -13,5 +13,13 @@
     "default_title": "Traduzir area da HQ",
     "default_popup": "popup.html"
   },
+  "commands": {
+    "start-selection": {
+      "suggested_key": {
+        "default": "Alt+Shift+O"
+      },
+      "description": "Selecionar area para OCR"
+    }
+  },
   "options_page": "options.html"
 }

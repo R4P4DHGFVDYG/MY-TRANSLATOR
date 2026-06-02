@@ -104,12 +104,18 @@ OCR: PaddleOCR e EasyOCR marcados
 ## Usar
 
 1. Abra uma HQ ou webcomic no navegador.
-2. Clique no botao da extensao.
+2. Clique no botao da extensao ou use `Alt+Shift+O`.
 3. Arraste somente em cima do texto.
 4. Espere alguns segundos.
 5. A traducao aparece perto da selecao.
 
 Dica: selecione so o balao ou legenda. Se selecionar a pagina inteira, fica lento e erra mais.
+
+Para trocar o atalho, abra:
+
+```text
+chrome://extensions/shortcuts
+```
 
 ## Atualizar
 
