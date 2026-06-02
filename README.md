@@ -1,78 +1,98 @@
-# Tradutor de HQs Guys
+# I LOVE WEBCOMICS
 
-Extensao para Chrome/Edge que deixa selecionar um balao ou legenda de HQ na tela, roda OCR e mostra a traducao em um overlay.
+Tradutor de HQs/webcomics para Chrome e Edge.
 
-Aviso direto: a extensao sozinha nao funciona. Ela precisa de um bridge local em Python rodando no PC de quem vai usar.
+Voce seleciona um balao, legenda ou texto na pagina. A extensao le o texto da imagem e mostra a traducao em portugues.
 
-Fluxo:
+Importante: a extensao precisa de um programinha local em Python rodando no seu PC. Sem ele, ela nao consegue fazer OCR.
 
-1. A extensao captura a area selecionada no navegador.
-2. O bridge local recorta a imagem.
-3. O bridge roda OCR, por padrao `PaddleOCR` e depois `EasyOCR`.
-4. O bridge envia o texto reconhecido para o tradutor.
-5. A extensao mostra a traducao perto da selecao.
+## O Que Voce Precisa
 
-## Requisitos
-
-- Windows 10/11.
+- Windows 10 ou 11.
 - Python 3.10 ou mais novo.
 - Chrome ou Edge.
-- Internet para instalar dependencias e usar traducao.
+- Internet na primeira instalacao.
 
-Nao precisa instalar Tesseract. Ele existe como fallback no projeto, mas o OCR recomendado agora e PaddleOCR.
+Baixe Python aqui:
 
-## Instalar
+```text
+https://www.python.org/downloads/
+```
 
-Abra o PowerShell e rode:
+Na instalacao do Python, marque:
+
+```text
+Add Python to PATH
+```
+
+## Baixar O Projeto
+
+Escolha um dos jeitos.
+
+### Jeito Facil
+
+1. Clique no botao verde `Code` aqui no GitHub.
+2. Clique em `Download ZIP`.
+3. Extraia o ZIP em `Documentos`.
+4. Renomeie a pasta extraida para:
+
+```text
+I-LOVE-WEBCOMICS
+```
+
+### Jeito Com Git
+
+No PowerShell:
 
 ```powershell
 cd "$env:USERPROFILE\Documents"
-git clone https://github.com/R4P4DHGFVDYG/I-LOVE-WEBCOMICS-.git
-cd ".\I-LOVE-WEBCOMICS-\bridge"
+git clone https://github.com/R4P4DHGFVDYG/I-LOVE-WEBCOMICS-.git I-LOVE-WEBCOMICS
+```
+
+## Instalar
+
+No PowerShell:
+
+```powershell
+cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\bridge"
 
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-ocr.txt -r requirements-paddleocr.txt
 ```
 
-A instalacao pode demorar. PaddleOCR, EasyOCR e Torch sao pesados.
+Essa parte demora. E normal.
 
-## Iniciar o bridge
+## Iniciar
 
-Sempre que for usar a extensao, deixe este comando rodando:
+Sempre que for usar, deixe este PowerShell aberto:
 
 ```powershell
-cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS-\bridge"
+cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\bridge"
 .\.venv\Scripts\python.exe -m hq_ocr_bridge
 ```
 
-Se deu certo, o terminal deve mostrar que o servidor esta em:
+Se estiver tudo certo, aparece um servidor em:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-Para testar:
+Nao feche essa janela enquanto estiver usando a extensao.
 
-```powershell
-Invoke-RestMethod -Uri http://127.0.0.1:8765/health | ConvertTo-Json -Depth 8
-```
+## Instalar A Extensao No Navegador
 
-Para parar o bridge, aperte `Ctrl+C` no terminal onde ele esta rodando.
-
-## Carregar a extensao no Chrome ou Edge
-
-1. Abra `chrome://extensions` ou `edge://extensions`.
+1. Abra `chrome://extensions` no Chrome ou `edge://extensions` no Edge.
 2. Ative `Modo do desenvolvedor`.
 3. Clique em `Carregar sem compactacao`.
-4. Selecione a pasta:
+4. Selecione esta pasta:
 
 ```text
-I-LOVE-WEBCOMICS-\extension
+Documentos\I-LOVE-WEBCOMICS\extension
 ```
 
 5. Abra as opcoes da extensao.
-6. Confirme:
+6. Deixe assim:
 
 ```text
 Bridge URL: http://127.0.0.1:8765
@@ -81,99 +101,68 @@ Destino: pt-BR
 OCR: PaddleOCR e EasyOCR marcados
 ```
 
-## Como usar
+## Usar
 
-1. Abra uma HQ no navegador.
+1. Abra uma HQ ou webcomic no navegador.
 2. Clique no botao da extensao.
-3. Arraste em cima do balao, legenda ou texto.
-4. Espere o OCR terminar.
-5. Leia a traducao no overlay.
+3. Arraste somente em cima do texto.
+4. Espere alguns segundos.
+5. A traducao aparece perto da selecao.
 
-Selecione so o texto. Se selecionar painel grande, pagina inteira ou imagem muito pesada, o OCR fica lento e pode errar mais.
-
-## Debug
-
-Nas opcoes da extensao existe `Salvar recortes OCR`.
-
-Use isso apenas para investigar erro. Ele salva imagens e JSONs em:
-
-```text
-bridge\debug-captures
-```
-
-Esses arquivos nao devem ir para o GitHub.
-
-## Problemas comuns
-
-### A extensao diz que o bridge falhou
-
-O bridge provavelmente nao esta rodando. Rode:
-
-```powershell
-cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS-\bridge"
-.\.venv\Scripts\python.exe -m hq_ocr_bridge
-```
-
-### `python` nao e reconhecido
-
-Instale Python pelo site oficial:
-
-```text
-https://www.python.org/downloads/
-```
-
-Durante a instalacao, marque `Add Python to PATH`.
-
-### A primeira traducao demora muito
-
-Normal. O PaddleOCR pode carregar modelos e cache na primeira execucao.
-
-### `VERY MOODY` vira uma traducao estranha
-
-O OCR pode estar certo e o problema ser o tradutor. O projeto ja tenta enviar texto em formato mais natural para reduzir erro com ALL CAPS, mas o Google Translate nao oficial ainda pode falhar em alguns casos.
-
-### PowerShell bloqueia script de ativacao
-
-Nao precisa ativar a venv. Use sempre o Python direto:
-
-```powershell
-.\.venv\Scripts\python.exe -m hq_ocr_bridge
-```
+Dica: selecione so o balao ou legenda. Se selecionar a pagina inteira, fica lento e erra mais.
 
 ## Atualizar
 
-Dentro da pasta do projeto:
+Se voce baixou com Git:
 
 ```powershell
+cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS"
 git pull
 cd bridge
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-ocr.txt -r requirements-paddleocr.txt
 ```
 
-## Para usar sem instalar nada
+Se voce baixou ZIP, baixe o ZIP novo e substitua a pasta antiga.
 
-So com GitHub nao da. Alguem precisa hospedar o bridge em um servidor, VPS ou tunnel HTTPS. A extensao entao aponta para essa URL em vez de `http://127.0.0.1:8765`.
+## Problemas Comuns
 
-Exemplo:
+### A extensao diz que nao conseguiu conectar
 
-```text
-https://seu-bridge-online.com
-```
-
-Sem servidor compartilhado, cada pessoa precisa rodar o bridge no proprio PC.
-
-## Desenvolvimento
-
-Rodar testes do bridge:
+O programa local provavelmente nao esta rodando. Abra o PowerShell e rode:
 
 ```powershell
-cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS-\bridge"
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest --basetemp .\.pytest-tmp\pytest-run
+cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\bridge"
+.\.venv\Scripts\python.exe -m hq_ocr_bridge
 ```
 
-Documentacao extra:
+### `python` nao e reconhecido
+
+Reinstale o Python e marque:
 
 ```text
-docs\dev-setup.md
+Add Python to PATH
 ```
+
+Depois feche e abra o PowerShell de novo.
+
+### A primeira traducao demora
+
+Normal. O OCR carrega modelos pesados na primeira vez.
+
+### A traducao ficou estranha
+
+Pode acontecer. As vezes o OCR le certo, mas o tradutor entende a frase mal. Tente selecionar uma area menor, pegando apenas o texto.
+
+### PowerShell bloqueou a ativacao da venv
+
+Nao precisa ativar nada. Use sempre este formato:
+
+```powershell
+.\.venv\Scripts\python.exe -m hq_ocr_bridge
+```
+
+## Usar Sem Instalar No PC
+
+Ainda nao tem servidor publico pronto.
+
+Enquanto nao existir um servidor online, cada pessoa precisa rodar o programa local no proprio PC.
