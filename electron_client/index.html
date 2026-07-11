@@ -587,6 +587,7 @@
                         <select id="ocrEngine">
                             <option value="tesseract" selected>Tesseract — Windows</option>
                             <option value="paddleocr">PaddleOCR — Inteligência artificial</option>
+                            <option value="easyocr">EasyOCR — Alternativo</option>
                         </select>
                         <div class="field-help" id="ocrEngineHint">Tesseract inicia mais rápido e funciona bem com fontes pixeladas.</div>
                     </div>
@@ -712,7 +713,7 @@
     <script>
         const desktopApi = window.ocrDesktop;
         const OCR_STORAGE_KEY = 'grc-translator-ocr-engine';
-        const allowedOcrEngines = new Set(['tesseract', 'paddleocr']);
+        const allowedOcrEngines = new Set(['tesseract', 'paddleocr', 'easyocr']);
         const settingIds = ['source', 'target', 'ocrEngine', 'position', 'textColor', 'bgColor', 'opacity', 'mouseShortcut'];
 
         function restoreOcrEngine() {
@@ -727,9 +728,12 @@
         }
 
         function updateOcrHint(engine) {
-            document.getElementById('ocrEngineHint').textContent = engine === 'paddleocr'
-                ? 'PaddleOCR pode reconhecer fontes difíceis, mas o primeiro uso demora mais.'
-                : 'Tesseract inicia mais rápido e funciona bem com fontes pixeladas.';
+            const hints = {
+                tesseract: 'Tesseract inicia mais rápido e funciona bem com fontes pixeladas.',
+                paddleocr: 'PaddleOCR pode reconhecer fontes difíceis, mas o primeiro uso demora mais.',
+                easyocr: 'EasyOCR é uma alternativa mais lenta para comparar resultados.'
+            };
+            document.getElementById('ocrEngineHint').textContent = hints[engine] || hints.tesseract;
         }
 
         function updateVisualValues() {

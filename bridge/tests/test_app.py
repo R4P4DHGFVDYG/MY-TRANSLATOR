@@ -205,7 +205,7 @@ def test_requested_engines_are_deduplicated_and_validated():
     assert rejected.status_code == 400
     assert "unsupported OCR engine" in rejected.get_json()["error"]
 
-    easyocr_rejected = client.post(
+    easyocr_response = client.post(
         "/v1/translate-selection",
         json={
             "imageDataUrl": _png_data_url(),
@@ -215,8 +215,8 @@ def test_requested_engines_are_deduplicated_and_validated():
         },
     )
 
-    assert easyocr_rejected.status_code == 400
-    assert "unsupported OCR engine" in easyocr_rejected.get_json()["error"]
+    assert easyocr_response.status_code == 200
+    assert ocr_service.requests[-1] == {"engines": ["easyocr"]}
 
 
 def test_older_desktop_request_is_discarded_before_image_decode():

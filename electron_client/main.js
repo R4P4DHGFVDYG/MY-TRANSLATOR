@@ -21,7 +21,7 @@ const RESULT_CACHE_TTL_MS = 10 * 60 * 1000;
 const CLIENT_ID = randomUUID();
 const SOURCE_LANGUAGES = new Set(['en']);
 const TARGET_LANGUAGES = new Set(['pt-BR', 'en']);
-const OCR_ENGINES = new Set(['tesseract', 'paddleocr']);
+const OCR_ENGINES = new Set(['tesseract', 'paddleocr', 'easyocr']);
 const TOAST_POSITIONS = new Set(['custom', 'mouse', 'top', 'bottom', 'center']);
 
 let settingsWindow = null;

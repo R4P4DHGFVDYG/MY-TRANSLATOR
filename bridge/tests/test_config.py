@@ -44,7 +44,7 @@ def test_config_exposes_safety_limits_and_tesseract_default(
     assert config.paddleocr_detection_model == "PP-OCRv5_mobile_det"
     assert config.paddleocr_recognition_model == "en_PP-OCRv5_mobile_rec"
     assert config.default_ocr_engines == ("tesseract",)
-    assert config.allowed_ocr_engines == ("paddleocr", "tesseract")
+    assert config.allowed_ocr_engines == ("paddleocr", "easyocr", "tesseract")
     assert config.ocr_warmup_on_start is True
 
 

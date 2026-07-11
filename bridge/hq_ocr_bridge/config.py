@@ -80,7 +80,7 @@ class BridgeConfig:
     translation_cache_capacity: int = 128
     translation_cache_ttl_seconds: float = 900.0
     default_ocr_engines: tuple[str, ...] = ("tesseract",)
-    allowed_ocr_engines: tuple[str, ...] = ("paddleocr", "tesseract")
+    allowed_ocr_engines: tuple[str, ...] = ("paddleocr", "easyocr", "tesseract")
     max_ocr_engines: int = 3
     force_ocr_engines: bool = False
     ocr_engine_timeout_seconds: float = 0.0

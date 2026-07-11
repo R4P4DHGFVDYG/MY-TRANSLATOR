@@ -74,7 +74,7 @@ cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\electron_client"
 npm ci
 ```
 
-O aplicativo desktop incluido vem configurado para OCR em ingles. Nas configuracoes, e possivel alternar entre Tesseract e PaddleOCR; a escolha fica salva para a proxima inicializacao. O bridge localiza automaticamente a instalacao padrao do Tesseract em `C:\Program Files\Tesseract-OCR`.
+O aplicativo desktop incluido vem configurado para OCR em ingles. Nas configuracoes, e possivel alternar entre Tesseract, PaddleOCR e EasyOCR; a escolha fica salva para a proxima inicializacao. O bridge localiza automaticamente a instalacao padrao do Tesseract em `C:\Program Files\Tesseract-OCR`.
 
 ## Iniciar
 
