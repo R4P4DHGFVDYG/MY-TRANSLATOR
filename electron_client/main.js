@@ -96,6 +96,28 @@ function getWebPreferences() {
     };
 }
 
+function configureFullscreenOverlay(window) {
+    if (!isWindowAlive(window)) {
+        return;
+    }
+
+    window.setAlwaysOnTop(true, 'screen-saver');
+}
+
+function showOverlay(window, inactive = false) {
+    if (!isWindowAlive(window)) {
+        return;
+    }
+
+    configureFullscreenOverlay(window);
+    if (inactive) {
+        window.showInactive();
+    } else {
+        window.show();
+    }
+    window.moveTop();
+}
+
 function closeToastWindow() {
     if (toastCloseTimer) {
         clearTimeout(toastCloseTimer);
@@ -448,7 +470,7 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             if (pendingToastPayload) {
                 sendToWindow(currentToast, 'set-text', pendingToastPayload);
             }
-            currentToast.showInactive();
+            showOverlay(currentToast, true);
         });
         currentToast.loadFile(path.join(__dirname, 'toast.html')).catch(error => {
             console.error('Failed to load translation toast:', error);
@@ -460,7 +482,7 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
         });
     } else if (toastReady) {
         sendToWindow(currentToast, 'set-text', pendingToastPayload);
-        currentToast.showInactive();
+        showOverlay(currentToast, true);
     }
 
     let posX = Math.floor(workArea.x + (workArea.width - TOAST_WIDTH) / 2);
@@ -551,6 +573,7 @@ async function startSnip(mode = 'single') {
             show: false,
             webPreferences: getWebPreferences()
         });
+        configureFullscreenOverlay(currentSnip);
 
         snipWindow = currentSnip;
         snipDisplay = display;
@@ -570,7 +593,7 @@ async function startSnip(mode = 'single') {
             return;
         }
 
-        currentSnip.show();
+        showOverlay(currentSnip);
         publishFixedAreaState();
     } catch (error) {
         console.error('Failed to open screen selector:', error);
@@ -724,7 +747,7 @@ async function runFixedCapture(generation) {
             });
         } finally {
             if (isWindowAlive(hiddenToast)) {
-                hiddenToast.showInactive();
+                showOverlay(hiddenToast, true);
             }
         }
         if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
