@@ -12,11 +12,12 @@ from hq_ocr_bridge.ocr import (
     OcrCancelledError,
     OcrCapacityError,
     OcrService,
+    _filtered_tesseract_words,
 )
 
 
-def test_default_engine_uses_the_low_latency_paddle_path():
-    assert DEFAULT_ENGINES == ["paddleocr"]
+def test_default_engine_uses_windows_tesseract():
+    assert DEFAULT_ENGINES == ["tesseract"]
 
 
 def test_paddleocr_engine_can_be_requested(monkeypatch):
@@ -36,6 +37,26 @@ def test_paddleocr_engine_can_be_requested(monkeypatch):
     assert best is not None
     assert best.text == "HELLO WORLD"
     assert [result.engine for result in results] == ["paddleocr:standard"]
+
+
+def test_tesseract_filters_large_portrait_artifacts_and_detached_noise():
+    data = {
+        "text": ["(3)", "put", "honey", "CO", "honey?"],
+        "conf": [26, 96, 94, 43, 95],
+        "left": [76, 336, 464, 44, 336],
+        "width": [125, 88, 152, 196, 184],
+        "height": [124, 48, 48, 52, 48],
+        "block_num": [1, 1, 1, 1, 1],
+        "par_num": [1, 1, 1, 1, 1],
+        "line_num": [2, 2, 2, 3, 3],
+        "word_num": [1, 2, 3, 1, 2],
+    }
+
+    assert _filtered_tesseract_words(data) == [
+        ("put", 96.0),
+        ("honey", 94.0),
+        ("honey?", 95.0),
+    ]
 
 
 def test_ocr_max_variants_limits_easyocr_work(monkeypatch):

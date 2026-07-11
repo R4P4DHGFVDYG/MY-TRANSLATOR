@@ -27,7 +27,7 @@ def test_performance_env_vars_are_loaded(monkeypatch):
     assert config.easyocr_gpu is True
 
 
-def test_config_exposes_safety_limits_and_fast_mobile_paddle_defaults(
+def test_config_exposes_safety_limits_and_tesseract_default(
     monkeypatch,
 ):
     monkeypatch.setenv("HQ_OCR_MAX_REQUEST_BYTES", "2048")
@@ -43,7 +43,7 @@ def test_config_exposes_safety_limits_and_fast_mobile_paddle_defaults(
     assert config.cors_allowed_origins == ("chrome-extension://trusted",)
     assert config.paddleocr_detection_model == "PP-OCRv5_mobile_det"
     assert config.paddleocr_recognition_model == "en_PP-OCRv5_mobile_rec"
-    assert config.default_ocr_engines == ("paddleocr",)
+    assert config.default_ocr_engines == ("tesseract",)
     assert config.allowed_ocr_engines == ("paddleocr", "tesseract")
     assert config.ocr_warmup_on_start is True
 

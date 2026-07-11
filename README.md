@@ -59,7 +59,8 @@ cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\bridge"
 
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-ocr.txt -r requirements-paddleocr.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-tesseract.txt
+winget install --id UB-Mannheim.TesseractOCR --exact
 ```
 
 Essa parte demora. E normal.
@@ -73,7 +74,7 @@ cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\electron_client"
 npm ci
 ```
 
-O aplicativo desktop incluido vem configurado para OCR em ingles e usa o perfil PaddleOCR mobile de baixa latencia. Para reconhecer outros idiomas, configure os modelos do bridge antes de alterar o cliente.
+O aplicativo desktop incluido vem configurado para OCR em ingles e usa o Tesseract instalado no Windows. O bridge localiza automaticamente a instalacao padrao em `C:\Program Files\Tesseract-OCR`.
 
 ## Iniciar
 
@@ -103,7 +104,7 @@ npm start
 
 Use `Ctrl+Shift+Q` ou um dos botoes laterais configurados para selecionar uma area da tela.
 
-No pacote local deste projeto, `iniciar_tradutor_jogos.bat` inicia o bridge, espera o modelo OCR terminar o aquecimento e somente entao abre o Electron. Isso evita que a primeira captura pague o custo de carregar os modelos.
+No pacote local deste projeto, `iniciar_tradutor_jogos.bat` inicia o bridge, verifica o OCR e somente entao abre o Electron.
 
 ## Instalar A Extensao No Navegador
 
@@ -150,7 +151,7 @@ Se voce baixou com Git:
 cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS"
 git pull
 cd bridge
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-ocr.txt -r requirements-paddleocr.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-tesseract.txt
 cd ..\electron_client
 npm ci
 ```
@@ -188,7 +189,7 @@ O caminho desktop rapido aplica estas otimizacoes:
 
 - abre o seletor imediatamente e captura somente depois que a regiao foi escolhida;
 - recorta a regiao no processo principal do Electron e envia apenas esse PNG ao bridge;
-- usa PaddleOCR mobile, uma variante de pre-processamento e aquecimento no inicio;
+- usa Tesseract local com filtragem de artefatos pela posicao e confianca das palavras;
 - reutiliza resultados por imagem e texto com caches LRU/TTL;
 - cancela trabalho obsoleto quando uma captura mais nova chega;
 - reutiliza a janela de traducao e conexoes HTTP.

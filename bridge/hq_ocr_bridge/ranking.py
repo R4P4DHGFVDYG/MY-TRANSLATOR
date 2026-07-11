@@ -132,6 +132,10 @@ def rank_ocr_results(results: list[EngineResult]) -> EngineResult | None:
 
 
 def _fix_comic_letter_confusions(text: str) -> str:
+    text = re.sub(r"^\s*\*+\s*", "", text)
+    text = re.sub(r"^CIT'{1,2}S\b", "(It's", text, flags=re.IGNORECASE)
+    text = re.sub(r"^IT'{1,2}S\b", "It's", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bMOMS(?=\s+VAN\b)", "mom's", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(?:1a|la|ia)\s+(?=with\b)", "...", text, flags=re.IGNORECASE)
     text = re.sub(r"\b4(?=[oO][uU])", "Y", text)
     text = re.sub(r"\b5[oO]\b", lambda match: _case_like("so", match.group(0)), text)
@@ -220,14 +224,18 @@ def _is_suspicious_mixed_case(word: str) -> bool:
 
 
 def _fix_punctuation(text: str) -> str:
+    text = re.sub(r"^\.\.\.\s+and,\s+", "...and ", text, flags=re.IGNORECASE)
     text = re.sub(r";\s*7\b", "...", text)
     text = re.sub(r"\(?\bTIS\b", "IT'S", text, flags=re.IGNORECASE)
     text = re.sub(r"\s+([.,!?;:])", r"\1", text)
     text = re.sub(r"([({\[])\s+", r"\1", text)
+    text = re.sub(r"\s+([)}\]])", r"\1", text)
     text = re.sub(r"\.{2,}", "...", text)
     text = re.sub(r";(?=\s*$)", ".", text)
     text = re.sub(r":(?=\s*$)", ".", text)
     text = re.sub(r"\bIT'S(?=\s+HOSTAGE\b)", "ITS", text)
+    if text.startswith("(") and text.endswith("}"):
+        text = text[:-1].rstrip() + ")"
     return text
 
 

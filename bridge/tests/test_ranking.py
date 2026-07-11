@@ -46,6 +46,18 @@ def test_normalize_ocr_text_fixes_observed_paddleocr_confusions():
     )
 
 
+def test_normalize_ocr_text_fixes_observed_tesseract_confusions():
+    assert normalize_ocr_text("* You quickly look away.") == (
+        "You quickly look away."
+    )
+    assert normalize_ocr_text("*... and, don't forget") == (
+        "...and don't forget"
+    )
+    assert normalize_ocr_text("CIt''s your moms van. )") == (
+        "(It's your mom's van.)"
+    )
+
+
 def test_normalize_ocr_text_keeps_sentence_case_when_not_all_caps():
     text = "third lap around and I still can t find it My"
 

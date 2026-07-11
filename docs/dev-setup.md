@@ -20,10 +20,17 @@ pip install -r requirements.txt -r requirements-dev.txt
 Instalar OCR real, quando for testar o pipeline completo:
 
 ```powershell
-pip install -r requirements-ocr.txt -r requirements-paddleocr.txt
+pip install -r requirements-tesseract.txt
+winget install --id UB-Mannheim.TesseractOCR --exact
 ```
 
-O Tesseract tambem precisa estar instalado no Windows e disponivel no `PATH`; `pytesseract` e apenas o wrapper Python.
+`pytesseract` e apenas o wrapper Python. O bridge procura o executavel no `PATH` e na instalacao padrao `C:\Program Files\Tesseract-OCR`.
+
+PaddleOCR e EasyOCR permanecem opcionais para comparacoes:
+
+```powershell
+pip install -r requirements-ocr.txt -r requirements-paddleocr.txt
+```
 
 Rodar testes:
 
@@ -62,23 +69,18 @@ $env:HQ_OCR_ALLOW_REQUEST_DEBUG_CAPTURES = "true"
 
 Mantenha essa opcao desligada em uso normal: os recortes podem conter texto sensivel.
 
-O perfil rapido agora e o padrao: PaddleOCR mobile, uma variante, cache de OCR e aquecimento em segundo plano. Para sobrescrever explicitamente os valores:
+O perfil padrao usa Tesseract local, uma variante e cache de OCR. Para sobrescrever explicitamente os valores:
 
 ```powershell
 $env:HQ_OCR_FORCE_ENGINES = "true"
-$env:HQ_OCR_DEFAULT_ENGINES = "paddleocr"
-$env:HQ_OCR_PADDLEOCR_DETECTION_MODEL = "PP-OCRv5_mobile_det"
-$env:HQ_OCR_PADDLEOCR_RECOGNITION_MODEL = "en_PP-OCRv5_mobile_rec"
-$env:HQ_OCR_PADDLEOCR_MAX_PIXELS = "500000"
+$env:HQ_OCR_DEFAULT_ENGINES = "tesseract"
 $env:HQ_OCR_MAX_VARIANTS = "1"
 $env:HQ_OCR_ENGINE_TIMEOUT_SECONDS = "8"
 $env:HQ_OCR_WARMUP_ON_START = "true"
 .\.venv\Scripts\python.exe -m hq_ocr_bridge
 ```
 
-MKL-DNN permanece desligado por padrao porque apresentou falha neste ambiente. Ative `HQ_OCR_PADDLEOCR_ENABLE_MKLDNN=true` somente depois de validar a CPU local.
-
-Para comparar qualidade contra velocidade, troque `HQ_OCR_DEFAULT_ENGINES` para `paddleocr,easyocr`, aumente `HQ_OCR_MAX_VARIANTS` e adicione:
+Para comparar Tesseract e PaddleOCR, instale as dependencias opcionais, troque `HQ_OCR_DEFAULT_ENGINES` para `tesseract,paddleocr`, aumente `HQ_OCR_MAX_VARIANTS` e adicione:
 
 ```powershell
 $env:HQ_OCR_PARALLEL_ENGINES = "true"

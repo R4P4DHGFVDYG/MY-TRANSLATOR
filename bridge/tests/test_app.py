@@ -245,7 +245,7 @@ def test_older_desktop_request_is_discarded_before_image_decode():
     assert current.get_json()["performance"]["requestId"] == 2
     assert stale.status_code == 409
     assert stale.get_json()["cancelled"] is True
-    assert ocr_service.requests == [{"engines": ["paddleocr"]}]
+    assert ocr_service.requests == [{"engines": ["tesseract"]}]
 
 
 def test_ready_endpoint_is_ready_when_an_ocr_service_is_injected():

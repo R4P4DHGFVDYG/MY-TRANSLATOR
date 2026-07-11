@@ -7,6 +7,7 @@ from io import BytesIO
 import importlib.util
 import math
 import os
+import shutil
 import threading
 import time
 from typing import Any, Callable
@@ -20,7 +21,7 @@ from .models import EngineResult
 from .ranking import normalize_ocr_text, rank_ocr_results, text_quality_score
 
 
-DEFAULT_ENGINES = ["paddleocr"]
+DEFAULT_ENGINES = ["tesseract"]
 SUPPORTED_ENGINES = frozenset({"easyocr", "paddleocr", "tesseract"})
 
 
@@ -498,16 +499,9 @@ class OcrService:
             config="--psm 6",
             output_type=Output.DICT,
         )
-        words: list[str] = []
-        confidences: list[float] = []
-        for text, confidence in zip(data.get("text", []), data.get("conf", [])):
-            clean = str(text).strip()
-            if not clean:
-                continue
-            conf_value = _finite_float(confidence)
-            if conf_value is not None and conf_value >= 0:
-                words.append(clean)
-                confidences.append(conf_value / 100)
+        recognized = _filtered_tesseract_words(data)
+        words = [text for text, _confidence in recognized]
+        confidences = [confidence / 100 for _text, confidence in recognized]
 
         if words:
             confidence = sum(confidences) / len(confidences) if confidences else 0.0
@@ -523,6 +517,33 @@ class OcrService:
     def _ensure_tesseract_available(self) -> None:
         if importlib.util.find_spec("pytesseract") is None:
             raise RuntimeError("pytesseract package is not installed")
+
+        import pytesseract
+
+        configured = pytesseract.pytesseract.tesseract_cmd
+        if shutil.which(configured):
+            return
+
+        if os.name == "nt":
+            candidates = (
+                os.path.join(
+                    os.environ.get("ProgramFiles", r"C:\Program Files"),
+                    "Tesseract-OCR",
+                    "tesseract.exe",
+                ),
+                os.path.join(
+                    os.environ.get("LOCALAPPDATA", ""),
+                    "Programs",
+                    "Tesseract-OCR",
+                    "tesseract.exe",
+                ),
+            )
+            for candidate in candidates:
+                if candidate and os.path.isfile(candidate):
+                    pytesseract.pytesseract.tesseract_cmd = candidate
+                    return
+
+        raise RuntimeError("tesseract executable is not installed or not on PATH")
 
     def _easyocr_health(self) -> dict[str, Any]:
         installed = importlib.util.find_spec("easyocr") is not None
@@ -565,11 +586,13 @@ class OcrService:
         try:
             import pytesseract
 
+            self._ensure_tesseract_available()
             version = str(pytesseract.get_tesseract_version())
             return {
                 "installed": True,
                 "language": self.config.tesseract_lang,
                 "version": version,
+                "executable": pytesseract.pytesseract.tesseract_cmd,
             }
         except Exception as exc:
             return {
@@ -659,3 +682,85 @@ def _paddleocr_payload(result: Any) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     return {}
+
+
+def _filtered_tesseract_words(data: dict[str, Any]) -> list[tuple[str, float]]:
+    texts = list(data.get("text", []))
+    entries: list[dict[str, Any]] = []
+    for index, value in enumerate(texts):
+        text = str(value).strip()
+        confidence = _tesseract_value(data, "conf", index)
+        height = _tesseract_value(data, "height", index)
+        left = _tesseract_value(data, "left", index)
+        width = _tesseract_value(data, "width", index)
+        if not text or confidence is None or confidence < 0:
+            continue
+        if height is None or height <= 0 or left is None or width is None:
+            continue
+        entries.append(
+            {
+                "text": text,
+                "confidence": confidence,
+                "height": height,
+                "left": left,
+                "right": left + max(0, width),
+                "line": (
+                    _tesseract_integer(data, "block_num", index),
+                    _tesseract_integer(data, "par_num", index),
+                    _tesseract_integer(data, "line_num", index),
+                ),
+                "word": _tesseract_integer(data, "word_num", index),
+                "index": index,
+            }
+        )
+
+    if not entries:
+        return []
+
+    reliable_heights = sorted(
+        entry["height"] for entry in entries if entry["confidence"] >= 50
+    )
+    heights = reliable_heights or sorted(entry["height"] for entry in entries)
+    median_height = heights[len(heights) // 2]
+    entries = [
+        entry for entry in entries if entry["height"] <= median_height * 1.8
+    ]
+
+    lines: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
+    for entry in entries:
+        lines.setdefault(entry["line"], []).append(entry)
+
+    filtered: list[dict[str, Any]] = []
+    for line_entries in lines.values():
+        reliable = [entry for entry in line_entries if entry["confidence"] >= 50]
+        if not reliable:
+            continue
+        first_reliable_left = min(entry["left"] for entry in reliable)
+        for entry in line_entries:
+            is_detached_low_confidence = (
+                entry["confidence"] < 50
+                and entry["right"] < first_reliable_left - median_height * 1.5
+            )
+            if not is_detached_low_confidence:
+                filtered.append(entry)
+
+    filtered.sort(key=lambda entry: (entry["line"], entry["word"], entry["index"]))
+    return [
+        (entry["text"], entry["confidence"])
+        for entry in filtered
+    ]
+
+
+def _tesseract_value(
+    data: dict[str, Any], key: str, index: int
+) -> float | None:
+    values = data.get(key, [])
+    try:
+        return _finite_float(values[index])
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def _tesseract_integer(data: dict[str, Any], key: str, index: int) -> int:
+    value = _tesseract_value(data, key, index)
+    return int(value) if value is not None else 0

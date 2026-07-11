@@ -52,7 +52,7 @@ def translate_image(
         },
         "source": source_lang,
         "target": target_lang,
-        "engines": ["paddleocr"],
+        "engines": ["tesseract"],
         "clientId": CLIENT_ID,
         "requestId": current_request_id,
     }

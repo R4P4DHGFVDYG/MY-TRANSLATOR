@@ -4,7 +4,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   bridgeUrl: "http://127.0.0.1:8765",
   source: "en",
   target: "pt-BR",
-  engines: ["paddleocr", "easyocr"],
+  engines: ["tesseract"],
   debugCaptures: false,
   configVersion: CONFIG_VERSION
 });

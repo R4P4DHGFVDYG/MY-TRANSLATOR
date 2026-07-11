@@ -766,7 +766,7 @@ async function translateSelection(selection, anchorPoint, display, translationId
                 viewport: { width: selection.width, height: selection.height },
                 source: requestSettings.sourceLang,
                 target: requestSettings.targetLang,
-                engines: ['paddleocr'],
+                engines: ['tesseract'],
                 clientId: CLIENT_ID,
                 requestId: translationId
             })
