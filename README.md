@@ -67,7 +67,7 @@ Essa parte demora. E normal.
 
 ### Aplicativo Desktop (Recomendado)
 
-Para usar o atalho `Ctrl+Shift+Q` fora do navegador, instale tambem as dependencias do Electron:
+Para usar um atalho global fora do navegador, instale tambem as dependencias do Electron:
 
 ```powershell
 cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\electron_client"
@@ -102,7 +102,9 @@ cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\electron_client"
 npm start
 ```
 
-Use `Ctrl+Shift+Q`, um dos botoes laterais configurados ou `Definir area automatica` para selecionar a regiao das legendas. O aplicativo verifica essa area continuamente, ignora imagens e textos repetidos e traduz apenas quando o conteudo muda. Use o mesmo atalho para redefinir a regiao ou clique em `Parar traducao automatica` para encerrar o monitoramento.
+Use o atalho configurado ou `Definir area automatica` para selecionar a regiao das legendas. O aplicativo verifica essa area continuamente, ignora imagens e textos repetidos e traduz apenas quando o conteudo muda. Use o mesmo atalho para redefinir a regiao ou clique em `Parar traducao automatica` para encerrar o monitoramento.
+
+Em `Atalho de captura`, clique em `Alterar` e pressione a combinacao desejada. O aplicativo aceita combinacoes de teclado, teclas F1 a F24 sem modificadores, botao do meio e os dois botoes laterais do mouse. Os botoes esquerdo e direito nao podem ser usados para evitar bloquear os cliques normais do Windows.
 
 As janelas de selecao e traducao usam uma sobreposicao de tela cheia para permanecer visiveis em jogos no modo janela sem bordas (borderless fullscreen). Tela cheia exclusiva e alguns sistemas anti-cheat podem bloquear sobreposicoes ou a captura do Windows; nesses casos, selecione janela sem bordas nas configuracoes do jogo.
 

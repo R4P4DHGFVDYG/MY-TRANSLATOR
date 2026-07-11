@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("XBUTTON1", "XBUTTON2")]
+    [ValidateSet("MBUTTON", "XBUTTON1", "XBUTTON2")]
     [string]$Button = "XBUTTON1",
     [switch]$NoBlock,
     [switch]$SelfTest
@@ -18,6 +18,7 @@ using System.Runtime.InteropServices;
 public static class SideMouseHook
 {
     private const int WH_MOUSE_LL = 14;
+    private const int WM_MBUTTONDOWN = 0x0207;
     private const int WM_XBUTTONDOWN = 0x020B;
     private const int XBUTTON1 = 0x0001;
     private const int XBUTTON2 = 0x0002;
@@ -67,11 +68,19 @@ public static class SideMouseHook
 
     private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0 && wParam.ToInt32() == WM_XBUTTONDOWN)
+        if (nCode >= 0)
         {
-            MSLLHOOKSTRUCT data = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
-            int xButton = (data.mouseData >> 16) & 0xffff;
-            string button = xButton == XBUTTON1 ? "XBUTTON1" : xButton == XBUTTON2 ? "XBUTTON2" : "";
+            string button = "";
+            if (wParam.ToInt32() == WM_MBUTTONDOWN)
+            {
+                button = "MBUTTON";
+            }
+            else if (wParam.ToInt32() == WM_XBUTTONDOWN)
+            {
+                MSLLHOOKSTRUCT data = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+                int xButton = (data.mouseData >> 16) & 0xffff;
+                button = xButton == XBUTTON1 ? "XBUTTON1" : xButton == XBUTTON2 ? "XBUTTON2" : "";
+            }
 
             if (!String.IsNullOrEmpty(button) && button == TargetButton)
             {

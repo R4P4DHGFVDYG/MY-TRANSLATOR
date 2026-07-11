@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const { createHash, randomUUID } = require('crypto');
 const path = require('path');
 const { FixedAreaChangeTracker, rectanglesOverlap } = require('./fixed_area');
+const { normalizeCaptureShortcut } = require('./shortcut');
 
 const APP_NAME = 'G.R.C TRANSLATOR';
 const APP_ICON_PATH = path.join(__dirname, 'assets', 'spider-intro.png');
@@ -40,6 +41,7 @@ let toastReady = false;
 let pendingToastPayload = null;
 let isPositioningToast = false;
 let sideMouseHookProcess = null;
+let registeredKeyboardShortcut = null;
 let isStartingSnip = false;
 let activeTranslation = null;
 let nextTranslationId = 0;
@@ -63,7 +65,8 @@ const settings = {
     opacity: 0.94,
     customX: -1,
     customY: -1,
-    mouseShortcutButton: 'XBUTTON1'
+    captureShortcutType: 'keyboard',
+    captureShortcutValue: 'Ctrl+Shift+Q'
 };
 
 function isWindowAlive(window) {
@@ -164,7 +167,7 @@ function getPowerShellPath() {
 }
 
 function isMouseShortcutButton(value) {
-    return value === 'XBUTTON1' || value === 'XBUTTON2';
+    return value === 'MBUTTON' || value === 'XBUTTON1' || value === 'XBUTTON2';
 }
 
 function stopSideMouseShortcut() {
@@ -183,7 +186,11 @@ function stopSideMouseShortcut() {
 function startSideMouseShortcut() {
     stopSideMouseShortcut();
 
-    if (process.platform !== 'win32' || !isMouseShortcutButton(settings.mouseShortcutButton)) {
+    if (
+        process.platform !== 'win32'
+        || settings.captureShortcutType !== 'mouse'
+        || !isMouseShortcutButton(settings.captureShortcutValue)
+    ) {
         return;
     }
 
@@ -195,7 +202,7 @@ function startSideMouseShortcut() {
         '-File',
         hookPath,
         '-Button',
-        settings.mouseShortcutButton
+        settings.captureShortcutValue
     ], {
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -213,7 +220,7 @@ function startSideMouseShortcut() {
         hookBuffer = lines.pop() || '';
 
         for (const line of lines) {
-            if (line.trim() === settings.mouseShortcutButton) {
+            if (line.trim() === settings.captureShortcutValue) {
                 void startSnip();
             }
         }
@@ -232,14 +239,47 @@ function startSideMouseShortcut() {
     });
 }
 
-function registerKeyboardShortcut() {
-    const registered = globalShortcut.register('CommandOrControl+Shift+Q', () => {
-        void startSnip();
-    });
-
-    if (!registered) {
-        console.error('Could not register Ctrl+Shift+Q shortcut.');
+function unregisterKeyboardShortcut() {
+    if (registeredKeyboardShortcut) {
+        globalShortcut.unregister(registeredKeyboardShortcut);
+        registeredKeyboardShortcut = null;
     }
+}
+
+function setCaptureShortcut(type, value) {
+    const shortcut = normalizeCaptureShortcut(type, value);
+    if (!shortcut) {
+        return { ok: false, error: 'Atalho inválido.' };
+    }
+
+    if (shortcut.type === 'keyboard') {
+        if (registeredKeyboardShortcut === shortcut.value) {
+            return { ok: true, shortcut };
+        }
+        if (globalShortcut.isRegistered(shortcut.value)) {
+            return { ok: false, error: 'Esse atalho já está sendo usado por outro aplicativo.' };
+        }
+        const registered = globalShortcut.register(shortcut.value, () => {
+            void startSnip();
+        });
+        if (!registered) {
+            return { ok: false, error: 'O Windows não permitiu registrar esse atalho.' };
+        }
+
+        unregisterKeyboardShortcut();
+        stopSideMouseShortcut();
+        registeredKeyboardShortcut = shortcut.value;
+    } else {
+        unregisterKeyboardShortcut();
+        stopSideMouseShortcut();
+    }
+
+    settings.captureShortcutType = shortcut.type;
+    settings.captureShortcutValue = shortcut.value;
+    if (shortcut.type === 'mouse') {
+        startSideMouseShortcut();
+    }
+    return { ok: true, shortcut };
 }
 
 function createSettingsWindow() {
@@ -831,9 +871,6 @@ function updateSettings(newSettings) {
         }
     }
 
-    if (newSettings.mouseShortcutButton === 'disabled' || isMouseShortcutButton(newSettings.mouseShortcutButton)) {
-        settings.mouseShortcutButton = newSettings.mouseShortcutButton;
-    }
 }
 
 function validateSnipPayload(payload) {
@@ -1045,8 +1082,10 @@ app.whenReady().then(() => {
     }
     createSettingsWindow();
     createIntroWindow();
-    registerKeyboardShortcut();
-    startSideMouseShortcut();
+    const shortcutResult = setCaptureShortcut(settings.captureShortcutType, settings.captureShortcutValue);
+    if (!shortcutResult.ok) {
+        console.error(`Could not register default capture shortcut: ${shortcutResult.error}`);
+    }
 });
 
 app.on('will-quit', () => {
@@ -1070,12 +1109,14 @@ ipcMain.on('update-settings', (event, newSettings) => {
     if (!isEventFromWindow(event, settingsWindow)) {
         return;
     }
-
-    const previousMouseShortcutButton = settings.mouseShortcutButton;
     updateSettings(newSettings);
-    if (settings.mouseShortcutButton !== previousMouseShortcutButton) {
-        startSideMouseShortcut();
+});
+
+ipcMain.handle('set-capture-shortcut', (event, shortcut) => {
+    if (!isEventFromWindow(event, settingsWindow) || !isPlainObject(shortcut)) {
+        return { ok: false, error: 'Solicitação de atalho inválida.' };
     }
+    return setCaptureShortcut(shortcut.type, shortcut.value);
 });
 
 ipcMain.on('intro-complete', event => {

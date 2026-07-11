@@ -475,33 +475,48 @@
         }
 
         .shortcut-row {
-            display: grid;
-            grid-template-columns: 1fr auto;
-            align-items: end;
-            gap: 12px;
+            display: block;
         }
 
-        .keycaps {
-            height: 40px;
+        .shortcut-recorder-button {
+            width: 100%;
+            min-height: 44px;
             display: flex;
             align-items: center;
-            gap: 5px;
+            justify-content: space-between;
+            padding: 0 14px;
+            border: 1px solid rgba(180, 154, 255, 0.35);
+            border-radius: 0;
+            color: var(--text);
+            background: rgba(10, 15, 30, 0.72);
+            cursor: pointer;
+            font: inherit;
+            font-size: 12px;
+            font-weight: 700;
         }
 
-        kbd {
-            min-width: 25px;
-            height: 25px;
-            display: grid;
-            place-items: center;
-            padding: 0 7px;
-            border: 1px solid rgba(151, 182, 218, 0.22);
-            border-bottom-color: rgba(151, 182, 218, 0.4);
-            border-radius: 0;
-            color: #c9d7e5;
-            background: rgba(255,255,255,0.06);
-            box-shadow: 0 2px 0 rgba(0,0,0,0.35);
-            font-size: 9px;
-            font-weight: 750;
+        .shortcut-recorder-button.recording {
+            border-color: var(--purple);
+            color: #dacfff;
+            box-shadow: 0 0 0 2px rgba(180, 154, 255, 0.13);
+        }
+
+        .shortcut-recorder-button span:last-child {
+            color: var(--muted);
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .shortcut-hint {
+            min-height: 18px;
+            margin-top: 7px;
+            color: var(--muted);
+            font-size: 10px;
+            line-height: 1.4;
+        }
+
+        .shortcut-hint.error {
+            color: #ff9aa8;
         }
 
         .footer {
@@ -699,21 +714,15 @@
                     </div>
                     <div>
                         <div class="panel-title">Atalho de captura</div>
-                        <div class="panel-description">Escolha o botão mais rápido durante o jogo</div>
+                        <div class="panel-description">Pressione a combinação ou o botão que quiser usar</div>
                     </div>
                 </div>
                 <div class="shortcut-row">
-                    <div class="field">
-                        <label for="mouseShortcut">Atalho principal</label>
-                        <select id="mouseShortcut">
-                            <option value="XBUTTON1" selected>Botão lateral 1 — voltar</option>
-                            <option value="XBUTTON2">Botão lateral 2 — avançar</option>
-                            <option value="disabled">Somente teclado</option>
-                        </select>
-                    </div>
-                    <div class="keycaps" aria-label="Atalho de teclado alternativo">
-                        <kbd>CTRL</kbd><kbd>SHIFT</kbd><kbd>Q</kbd>
-                    </div>
+                    <button class="shortcut-recorder-button" id="shortcutRecorder" type="button">
+                        <span id="shortcutValue">Ctrl + Shift + Q</span>
+                        <span>Alterar</span>
+                    </button>
+                    <div class="shortcut-hint" id="shortcutHint">Clique para gravar um atalho de teclado ou mouse.</div>
                 </div>
             </section>
 
@@ -727,8 +736,84 @@
     <script>
         const desktopApi = window.ocrDesktop;
         const OCR_STORAGE_KEY = 'grc-translator-ocr-engine';
+        const SHORTCUT_STORAGE_KEY = 'grc-translator-capture-shortcut';
         const allowedOcrEngines = new Set(['tesseract', 'paddleocr', 'easyocr']);
-        const settingIds = ['source', 'target', 'ocrEngine', 'position', 'textColor', 'bgColor', 'opacity', 'mouseShortcut'];
+        const settingIds = ['source', 'target', 'ocrEngine', 'position', 'textColor', 'bgColor', 'opacity'];
+        let isRecordingShortcut = false;
+        let currentShortcut = { type: 'keyboard', value: 'Ctrl+Shift+Q' };
+
+        function shortcutLabel(shortcut) {
+            if (shortcut.type === 'mouse') {
+                return {
+                    MBUTTON: 'Botão do meio',
+                    XBUTTON1: 'Botão lateral 1',
+                    XBUTTON2: 'Botão lateral 2'
+                }[shortcut.value] || shortcut.value;
+            }
+            return shortcut.value.split('+').join(' + ');
+        }
+
+        function setShortcutHint(message, isError = false) {
+            const hint = document.getElementById('shortcutHint');
+            hint.textContent = message;
+            hint.classList.toggle('error', isError);
+        }
+
+        function setShortcutRecording(recording) {
+            isRecordingShortcut = recording;
+            const button = document.getElementById('shortcutRecorder');
+            button.classList.toggle('recording', recording);
+            button.querySelector('span:last-child').textContent = recording ? 'Ouvindo...' : 'Alterar';
+            if (recording) {
+                setShortcutHint('Pressione uma combinação, F1–F24 ou um botão do mouse. ESC cancela.');
+            }
+        }
+
+        async function applyCaptureShortcut(shortcut, persist = true) {
+            const result = await desktopApi.settings.setCaptureShortcut(shortcut);
+            if (!result?.ok) {
+                setShortcutHint(result?.error || 'Não foi possível registrar esse atalho.', true);
+                return false;
+            }
+            currentShortcut = result.shortcut;
+            document.getElementById('shortcutValue').textContent = shortcutLabel(currentShortcut);
+            setShortcutHint('Atalho ativo. Clique para escolher outro.');
+            if (persist) {
+                try {
+                    localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(currentShortcut));
+                } catch {
+                    // The shortcut remains active for the current session.
+                }
+            }
+            return true;
+        }
+
+        async function restoreCaptureShortcut() {
+            let shortcut = currentShortcut;
+            try {
+                const stored = JSON.parse(localStorage.getItem(SHORTCUT_STORAGE_KEY));
+                if (stored && typeof stored === 'object') {
+                    shortcut = stored;
+                }
+            } catch {
+                // The validated default remains active when storage is unavailable.
+            }
+            if (!await applyCaptureShortcut(shortcut, false) && shortcut !== currentShortcut) {
+                await applyCaptureShortcut(currentShortcut, false);
+            }
+        }
+
+        function keyForShortcut(event) {
+            if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3);
+            if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
+            if (/^F(?:[1-9]|1\d|2[0-4])$/.test(event.key)) return event.key;
+            return {
+                ' ': 'Space', Tab: 'Tab', Enter: 'Enter', Backspace: 'Backspace',
+                Delete: 'Delete', Insert: 'Insert', Home: 'Home', End: 'End',
+                PageUp: 'PageUp', PageDown: 'PageDown', ArrowUp: 'Up',
+                ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right'
+            }[event.key] || null;
+        }
 
         function restoreOcrEngine() {
             try {
@@ -791,8 +876,7 @@
                 position: document.getElementById('position').value,
                 textColor: document.getElementById('textColor').value,
                 bgColor: document.getElementById('bgColor').value,
-                opacity: document.getElementById('opacity').value / 100,
-                mouseShortcutButton: document.getElementById('mouseShortcut').value
+                opacity: document.getElementById('opacity').value / 100
             });
         }
 
@@ -817,8 +901,62 @@
         document.getElementById('minimizeButton').addEventListener('click', () => desktopApi.settings.minimize());
         document.getElementById('closeButton').addEventListener('click', () => desktopApi.settings.close());
         document.getElementById('fixedAreaButton').addEventListener('click', () => desktopApi.settings.toggleFixedArea());
+        document.getElementById('shortcutRecorder').addEventListener('click', () => setShortcutRecording(true));
+
+        document.addEventListener('keydown', async event => {
+            if (!isRecordingShortcut || event.repeat) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.key === 'Escape') {
+                setShortcutRecording(false);
+                setShortcutHint('Alteração cancelada.');
+                return;
+            }
+
+            const key = keyForShortcut(event);
+            if (!key) {
+                setShortcutHint('Complete a combinação com uma tecla que não seja modificadora.', true);
+                return;
+            }
+            const modifiers = [];
+            if (event.ctrlKey) modifiers.push('Ctrl');
+            if (event.altKey) modifiers.push('Alt');
+            if (event.shiftKey) modifiers.push('Shift');
+            if (event.metaKey) modifiers.push('Super');
+            if (!/^F(?:[1-9]|1\d|2[0-4])$/.test(key) && modifiers.length === 0) {
+                setShortcutHint('Use Ctrl, Alt, Shift ou Windows junto com essa tecla.', true);
+                return;
+            }
+
+            setShortcutRecording(false);
+            await applyCaptureShortcut({ type: 'keyboard', value: [...modifiers, key].join('+') });
+        }, true);
+
+        document.addEventListener('mousedown', async event => {
+            if (!isRecordingShortcut) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            const mouseButton = { 1: 'MBUTTON', 3: 'XBUTTON1', 4: 'XBUTTON2' }[event.button];
+            if (!mouseButton) {
+                setShortcutHint('Use o botão do meio ou um dos botões laterais do mouse.', true);
+                return;
+            }
+            setShortcutRecording(false);
+            await applyCaptureShortcut({ type: 'mouse', value: mouseButton });
+        }, true);
+
+        document.addEventListener('contextmenu', event => {
+            if (isRecordingShortcut) {
+                event.preventDefault();
+            }
+        });
 
         restoreOcrEngine();
+        restoreCaptureShortcut();
         saveSettings();
         refreshBridgeStatus();
         desktopApi.settings.getFixedAreaState().then(updateFixedAreaState).catch(() => {});
