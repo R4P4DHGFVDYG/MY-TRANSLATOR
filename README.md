@@ -80,7 +80,3 @@ Para melhor compatibilidade, use o jogo em **janela sem bordas**. Alguns jogos e
 - O OCR funciona no computador, mas a tradução precisa de internet.
 - A primeira inicialização de alguns mecanismos OCR pode demorar um pouco.
 - Ainda não existe um instalador pronto; por enquanto, o aplicativo é iniciado pelos comandos acima.
-
-## Documentação técnica
-
-Configurações avançadas, arquitetura, testes, privacidade, desempenho e manutenção estão no [README de desenvolvimento](README-DEV.md).
