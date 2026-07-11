@@ -2,6 +2,7 @@ const { app, BrowserWindow, globalShortcut, ipcMain, desktopCapturer, screen } =
 const { spawn } = require('child_process');
 const { createHash, randomUUID } = require('crypto');
 const path = require('path');
+const { FixedAreaChangeTracker, rectanglesOverlap } = require('./fixed_area');
 
 const APP_NAME = 'G.R.C TRANSLATOR';
 const APP_ICON_PATH = path.join(__dirname, 'assets', 'spider-intro.png');
@@ -15,6 +16,7 @@ const BRIDGE_DEFAULT_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const BRIDGE_DEFAULT_MAX_CROP_PIXELS = 12_000_000;
 const MAX_SNIP_PIXELS = BRIDGE_DEFAULT_MAX_CROP_PIXELS;
 const CAPTURE_SETTLE_MS = 16;
+const FIXED_CAPTURE_INTERVAL_MS = 650;
 const INTRO_FALLBACK_MS = 5000;
 const RESULT_CACHE_CAPACITY = 64;
 const RESULT_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -39,9 +41,16 @@ let pendingToastPayload = null;
 let isPositioningToast = false;
 let sideMouseHookProcess = null;
 let isStartingSnip = false;
+let snipMode = 'single';
 let activeTranslation = null;
 let nextTranslationId = 0;
+let fixedCaptureRegion = null;
+let fixedCaptureTimer = null;
+let fixedCaptureGeneration = 0;
+let fixedCaptureRunning = false;
+let fixedCaptureLastError = '';
 const resultCache = new Map();
+const fixedCaptureTracker = new FixedAreaChangeTracker();
 
 app.setName(APP_NAME);
 
@@ -97,6 +106,35 @@ function closeToastWindow() {
     toastReady = false;
     pendingToastPayload = null;
     isPositioningToast = false;
+}
+
+function getFixedAreaState() {
+    return {
+        active: Boolean(fixedCaptureRegion),
+        selecting: snipMode === 'fixed' && (isStartingSnip || isWindowAlive(snipWindow))
+    };
+}
+
+function publishFixedAreaState() {
+    sendToWindow(settingsWindow, 'fixed-area-state', getFixedAreaState());
+}
+
+function stopFixedCapture() {
+    const hadFixedCapture = Boolean(fixedCaptureRegion) || fixedCaptureTimer !== null;
+    if (fixedCaptureTimer) {
+        clearTimeout(fixedCaptureTimer);
+        fixedCaptureTimer = null;
+    }
+    fixedCaptureGeneration += 1;
+    fixedCaptureRegion = null;
+    fixedCaptureRunning = false;
+    fixedCaptureTracker.reset();
+    fixedCaptureLastError = '';
+    if (hadFixedCapture) {
+        cancelActiveTranslation();
+        nextTranslationId += 1;
+    }
+    publishFixedAreaState();
 }
 
 function getPowerShellPath() {
@@ -321,6 +359,45 @@ function clampToastPosition(position, workArea) {
     };
 }
 
+function fixedAreaBounds(display) {
+    if (!fixedCaptureRegion || fixedCaptureRegion.displayId !== display.id) {
+        return null;
+    }
+    const selection = fixedCaptureRegion.selection;
+    return {
+        x: display.bounds.x + selection.x,
+        y: display.bounds.y + selection.y,
+        width: selection.width,
+        height: selection.height
+    };
+}
+
+function positionOutsideFixedArea(position, workArea, display) {
+    const monitoredArea = fixedAreaBounds(display);
+    if (!monitoredArea) {
+        return position;
+    }
+    const toastArea = { ...position, width: TOAST_WIDTH, height: TOAST_HEIGHT };
+    if (!rectanglesOverlap(toastArea, monitoredArea)) {
+        return position;
+    }
+
+    const candidates = [
+        { x: position.x, y: monitoredArea.y - TOAST_HEIGHT - TOAST_MARGIN },
+        { x: position.x, y: monitoredArea.y + monitoredArea.height + TOAST_MARGIN },
+        { x: monitoredArea.x - TOAST_WIDTH - TOAST_MARGIN, y: position.y },
+        { x: monitoredArea.x + monitoredArea.width + TOAST_MARGIN, y: position.y }
+    ];
+    for (const candidate of candidates) {
+        const clamped = clampToastPosition(candidate, workArea);
+        const candidateArea = { ...clamped, width: TOAST_WIDTH, height: TOAST_HEIGHT };
+        if (!rectanglesOverlap(candidateArea, monitoredArea)) {
+            return clamped;
+        }
+    }
+    return position;
+}
+
 function showToast(text, x, y, currentSettings, preferredDisplay = null) {
     const anchorPoint = {
         x: Number.isFinite(x) ? x : 0,
@@ -407,7 +484,11 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
         posY = anchorPoint.y + 10;
     }
 
-    const clampedPosition = clampToastPosition({ x: posX, y: posY }, workArea);
+    const clampedPosition = positionOutsideFixedArea(
+        clampToastPosition({ x: posX, y: posY }, workArea),
+        workArea,
+        display
+    );
 
     isPositioningToast = true;
     currentToast.setPosition(Math.round(clampedPosition.x), Math.round(clampedPosition.y));
@@ -439,12 +520,14 @@ function getSourceForDisplay(sources, display) {
     return sources[displayIndex] || sources[0];
 }
 
-async function startSnip() {
+async function startSnip(mode = 'single') {
     if (isStartingSnip || isWindowAlive(snipWindow)) {
         return;
     }
 
+    stopFixedCapture();
     isStartingSnip = true;
+    snipMode = mode === 'fixed' ? 'fixed' : 'single';
     cancelActiveTranslation();
     nextTranslationId += 1;
     closeToastWindow();
@@ -475,15 +558,20 @@ async function startSnip() {
             if (snipWindow === currentSnip) {
                 snipWindow = null;
                 snipDisplay = null;
+                snipMode = 'single';
+                publishFixedAreaState();
             }
         });
 
-        await currentSnip.loadFile(path.join(__dirname, 'snip.html'));
+        await currentSnip.loadFile(path.join(__dirname, 'snip.html'), {
+            query: { mode: snipMode }
+        });
         if (!isWindowAlive(currentSnip) || snipWindow !== currentSnip) {
             return;
         }
 
         currentSnip.show();
+        publishFixedAreaState();
     } catch (error) {
         console.error('Failed to open screen selector:', error);
         if (isWindowAlive(snipWindow)) {
@@ -491,9 +579,12 @@ async function startSnip() {
         }
         snipWindow = null;
         snipDisplay = null;
+        snipMode = 'single';
+        publishFixedAreaState();
         showToast('Não foi possível abrir o seletor de tela.', captureDisplay.bounds.x, captureDisplay.bounds.y, settings, captureDisplay);
     } finally {
         isStartingSnip = false;
+        publishFixedAreaState();
     }
 }
 
@@ -501,7 +592,7 @@ function wait(milliseconds) {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
-async function captureSelection(selection, display) {
+async function captureSelection(selection, display, options = {}) {
     const totalStartedAt = performance.now();
     await wait(CAPTURE_SETTLE_MS);
 
@@ -553,19 +644,130 @@ async function captureSelection(selection, display) {
         base64: `data:image/png;base64,${png.toString('base64')}`,
         digest: createHash('sha256').update(png).digest('hex'),
         width: right - left,
-        height: bottom - top
+        height: bottom - top,
+        performance: {
+            captureMs: Number(captureMs.toFixed(2)),
+            cropMs: Number(cropMs.toFixed(2)),
+            encodeMs: Number(encodeMs.toFixed(2)),
+            totalMs: Number((performance.now() - totalStartedAt).toFixed(2)),
+            cropPixels: (right - left) * (bottom - top),
+            encodedBytes: png.length
+        }
     };
 
-    console.info('[performance]', JSON.stringify({
-        stage: 'capture',
-        captureMs: Number(captureMs.toFixed(2)),
-        cropMs: Number(cropMs.toFixed(2)),
-        encodeMs: Number(encodeMs.toFixed(2)),
-        totalMs: Number((performance.now() - totalStartedAt).toFixed(2)),
-        cropPixels: result.width * result.height,
-        encodedBytes: png.length
-    }));
+    if (options.logPerformance !== false) {
+        console.info('[performance]', JSON.stringify({
+            stage: 'capture',
+            ...result.performance
+        }));
+    }
     return result;
+}
+
+function scheduleFixedCapture(generation, delay = FIXED_CAPTURE_INTERVAL_MS) {
+    if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
+        return;
+    }
+    if (fixedCaptureTimer) {
+        clearTimeout(fixedCaptureTimer);
+    }
+    fixedCaptureTimer = setTimeout(() => {
+        fixedCaptureTimer = null;
+        void runFixedCapture(generation);
+    }, delay);
+}
+
+function startFixedCapture(selection, display) {
+    stopFixedCapture();
+    fixedCaptureRegion = {
+        selection: { ...selection },
+        displayId: display.id
+    };
+    fixedCaptureGeneration += 1;
+    const generation = fixedCaptureGeneration;
+    publishFixedAreaState();
+    scheduleFixedCapture(generation, 0);
+}
+
+async function runFixedCapture(generation) {
+    if (generation !== fixedCaptureGeneration || !fixedCaptureRegion || fixedCaptureRunning) {
+        return;
+    }
+
+    fixedCaptureRunning = true;
+    const region = fixedCaptureRegion;
+    const display = screen.getAllDisplays().find(item => item.id === region.displayId)
+        || screen.getPrimaryDisplay();
+    const anchorPoint = {
+        x: display.bounds.x + region.selection.x,
+        y: display.bounds.y + region.selection.y
+    };
+
+    try {
+        let hiddenToast = null;
+        const monitoredArea = fixedAreaBounds(display);
+        if (
+            monitoredArea
+            && isWindowAlive(toastWindow)
+            && toastWindow.isVisible()
+            && rectanglesOverlap(toastWindow.getBounds(), monitoredArea)
+        ) {
+            hiddenToast = toastWindow;
+            hiddenToast.hide();
+            await wait(50);
+        }
+
+        let captured;
+        try {
+            captured = await captureSelection(region.selection, display, {
+                logPerformance: false
+            });
+        } finally {
+            if (isWindowAlive(hiddenToast)) {
+                hiddenToast.showInactive();
+            }
+        }
+        if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
+            return;
+        }
+        if (!fixedCaptureTracker.updateDigest(captured.digest)) {
+            return;
+        }
+
+        fixedCaptureLastError = '';
+        console.info('[performance]', JSON.stringify({
+            stage: 'fixed-capture-change',
+            ...captured.performance
+        }));
+        const translationId = ++nextTranslationId;
+        await translateSelection(captured, anchorPoint, display, translationId, {
+            showLoading: false,
+            handleErrors: false,
+            shouldDisplay: payload => {
+                if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
+                    return false;
+                }
+                const sourceText = payload.sourceText.trim();
+                if (!sourceText) {
+                    fixedCaptureTracker.updateText('');
+                    closeToastWindow();
+                    return false;
+                }
+                return fixedCaptureTracker.updateText(sourceText);
+            }
+        });
+    } catch (error) {
+        if (generation === fixedCaptureGeneration && fixedCaptureRegion) {
+            const message = errorMessageForTranslation(error, false);
+            if (message !== fixedCaptureLastError) {
+                fixedCaptureLastError = message;
+                showToast(message, anchorPoint.x, anchorPoint.y, settings, display);
+            }
+        }
+    } finally {
+        fixedCaptureRunning = false;
+        scheduleFixedCapture(generation);
+    }
 }
 
 function isPlainObject(value) {
@@ -729,29 +931,36 @@ function displayTranslationPayload(payload, anchorPoint, requestSettings, displa
     }
 }
 
-async function translateSelection(selection, anchorPoint, display, translationId) {
+async function translateSelection(selection, anchorPoint, display, translationId, options = {}) {
     if (translationId !== nextTranslationId) {
         return;
     }
     cancelActiveTranslation();
 
     const requestSettings = { ...settings };
+    const shouldDisplay = typeof options.shouldDisplay === 'function'
+        ? options.shouldDisplay
+        : () => true;
     const cacheKey = resultCacheKey(selection, requestSettings);
     const cachedPayload = getCachedResult(cacheKey);
     if (cachedPayload) {
-        displayTranslationPayload(cachedPayload, anchorPoint, requestSettings, display);
+        if (shouldDisplay(cachedPayload)) {
+            displayTranslationPayload(cachedPayload, anchorPoint, requestSettings, display);
+        }
         console.info('[performance]', JSON.stringify({
             stage: 'translation',
             requestId: translationId,
             clientCacheHit: true,
             totalMs: 0
         }));
-        return;
+        return cachedPayload;
     }
 
     const controller = new AbortController();
     activeTranslation = { id: translationId, controller };
-    showToast('Traduzindo...', anchorPoint.x, anchorPoint.y, requestSettings, display);
+    if (options.showLoading !== false) {
+        showToast('Traduzindo...', anchorPoint.x, anchorPoint.y, requestSettings, display);
+    }
     const requestStartedAt = performance.now();
 
     let timedOut = false;
@@ -782,7 +991,9 @@ async function translateSelection(selection, anchorPoint, display, translationId
         }
 
         cacheResult(cacheKey, payload);
-        displayTranslationPayload(payload, anchorPoint, requestSettings, display);
+        if (shouldDisplay(payload)) {
+            displayTranslationPayload(payload, anchorPoint, requestSettings, display);
+        }
         console.info('[performance]', JSON.stringify({
             stage: 'translation',
             requestId: translationId,
@@ -790,11 +1001,15 @@ async function translateSelection(selection, anchorPoint, display, translationId
             totalMs: Number((performance.now() - requestStartedAt).toFixed(2)),
             server: payload.performance || null
         }));
+        return payload;
     } catch (error) {
         if (!isCurrentTranslation(translationId)) {
             return;
         }
 
+        if (options.handleErrors === false) {
+            throw error;
+        }
         showToast(errorMessageForTranslation(error, timedOut), anchorPoint.x, anchorPoint.y, requestSettings, display);
     } finally {
         clearTimeout(timeoutId);
@@ -823,6 +1038,7 @@ app.on('will-quit', () => {
         introFallbackTimer = null;
     }
     cancelActiveTranslation();
+    stopFixedCapture();
     globalShortcut.unregisterAll();
     stopSideMouseShortcut();
 });
@@ -865,6 +1081,36 @@ ipcMain.on('start-capture', event => {
     void startSnip();
 });
 
+ipcMain.on('toggle-fixed-area', event => {
+    if (!isEventFromWindow(event, settingsWindow)) {
+        return;
+    }
+
+    const state = getFixedAreaState();
+    if (state.active || state.selecting) {
+        if (state.selecting && isWindowAlive(snipWindow)) {
+            const currentSnip = snipWindow;
+            snipWindow = null;
+            snipDisplay = null;
+            snipMode = 'single';
+            closeWindow(currentSnip);
+        }
+        stopFixedCapture();
+        publishFixedAreaState();
+        return;
+    }
+
+    settingsWindow.minimize();
+    void startSnip('fixed');
+});
+
+ipcMain.handle('fixed-area-state', event => {
+    if (!isEventFromWindow(event, settingsWindow)) {
+        return { active: false, selecting: false };
+    }
+    return getFixedAreaState();
+});
+
 ipcMain.handle('bridge-status', event => {
     if (!isEventFromWindow(event, settingsWindow)) {
         return { state: 'offline', label: 'Status indisponível' };
@@ -880,16 +1126,26 @@ ipcMain.on('snip-complete', (event, payload) => {
 
     const selection = validateSnipPayload(payload);
     const display = snipDisplay || screen.getPrimaryDisplay();
+    const completedMode = snipMode;
     snipWindow = null;
     snipDisplay = null;
+    snipMode = 'single';
     if (isWindowAlive(currentSnip)) {
         currentSnip.hide();
         currentSnip.destroy();
     }
     if (!selection) {
+        publishFixedAreaState();
         showToast('A seleção capturada é inválida ou grande demais.', display.bounds.x, display.bounds.y, settings, display);
         return;
     }
+
+    if (completedMode === 'fixed') {
+        startFixedCapture(selection, display);
+        return;
+    }
+
+    publishFixedAreaState();
 
     const anchorPoint = {
         x: display.bounds.x + selection.x,
@@ -915,7 +1171,9 @@ ipcMain.on('snip-cancel', event => {
     const currentSnip = snipWindow;
     snipWindow = null;
     snipDisplay = null;
+    snipMode = 'single';
     closeWindow(currentSnip);
+    publishFixedAreaState();
 });
 
 ipcMain.on('close-toast', event => {

@@ -94,6 +94,11 @@
     
     <script>
         const desktopApi = window.ocrDesktop;
+        const mode = new URLSearchParams(window.location.search).get('mode');
+        if (mode === 'fixed') {
+            document.querySelector('.hint-copy strong').textContent = 'Defina a área fixa de tradução';
+            document.querySelector('.hint-copy > span').innerHTML = 'Tudo que mudar nesta área será traduzido <span class="key">ESC</span> cancela';
+        }
         const overlayCanvas = document.getElementById('overlay');
         const overlayCtx = overlayCanvas.getContext('2d');
         const dimensionBadge = document.getElementById('dimensionBadge');

@@ -279,6 +279,26 @@
             transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease;
         }
 
+        .hero-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .capture-button.secondary {
+            height: 42px;
+            border: 1px solid rgba(180, 154, 255, 0.38);
+            color: var(--text);
+            background: rgba(180, 154, 255, 0.1);
+            box-shadow: none;
+        }
+
+        .capture-button.secondary.active {
+            border-color: rgba(74, 226, 168, 0.58);
+            color: #d8fff0;
+            background: rgba(74, 226, 168, 0.13);
+        }
+
         .capture-button:hover {
             transform: translateY(-2px);
             filter: brightness(1.05);
@@ -557,16 +577,25 @@
                         <span id="statusLabel">Verificando o bridge</span>
                     </div>
                     <h1>Tradutor desenvolvido para desktop, com foco em jogos.</h1>
-                    <p>Selecione a área que deseja traduzir usando o botão ou o atalho de sua preferência.
+                    <p>Traduza uma vez ou defina uma área fixa para acompanhar as próximas legendas automaticamente.
 </p>
                 </div>
-                <button class="capture-button" id="captureButton" type="button">
-                    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                        <path d="M7 3H4a1 1 0 0 0-1 1v3m10-4h3a1 1 0 0 1 1 1v3M7 17H4a1 1 0 0 1-1-1v-3m10 4h3a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                        <path d="M7 10h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                    </svg>
-                    Capturar agora
-                </button>
+                <div class="hero-actions">
+                    <button class="capture-button" id="captureButton" type="button">
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M7 3H4a1 1 0 0 0-1 1v3m10-4h3a1 1 0 0 1 1 1v3M7 17H4a1 1 0 0 1-1-1v-3m10 4h3a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                            <path d="M7 10h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                        </svg>
+                        Traduzir uma vez
+                    </button>
+                    <button class="capture-button secondary" id="fixedAreaButton" type="button" aria-pressed="false">
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M7 3H4a1 1 0 0 0-1 1v3m9-4h3a1 1 0 0 1 1 1v3M7 17H4a1 1 0 0 1-1-1v-3m9 4h3a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                            <circle cx="10" cy="10" r="2.2" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                        <span id="fixedAreaButtonLabel">Criar área fixa</span>
+                    </button>
+                </div>
             </section>
 
             <section class="panel">
@@ -736,6 +765,20 @@
             document.getElementById('ocrEngineHint').textContent = hints[engine] || hints.tesseract;
         }
 
+        function updateFixedAreaState(state) {
+            const button = document.getElementById('fixedAreaButton');
+            const label = document.getElementById('fixedAreaButtonLabel');
+            const active = Boolean(state?.active);
+            const selecting = Boolean(state?.selecting);
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-pressed', String(active));
+            label.textContent = selecting
+                ? 'Selecionando área...'
+                : active
+                    ? 'Parar área fixa'
+                    : 'Criar área fixa';
+        }
+
         function updateVisualValues() {
             const opacity = document.getElementById('opacity');
             const percentage = Number(opacity.value);
@@ -789,12 +832,18 @@
         document.getElementById('minimizeButton').addEventListener('click', () => desktopApi.settings.minimize());
         document.getElementById('closeButton').addEventListener('click', () => desktopApi.settings.close());
         document.getElementById('captureButton').addEventListener('click', () => desktopApi.settings.capture());
+        document.getElementById('fixedAreaButton').addEventListener('click', () => desktopApi.settings.toggleFixedArea());
 
         restoreOcrEngine();
         saveSettings();
         refreshBridgeStatus();
+        desktopApi.settings.getFixedAreaState().then(updateFixedAreaState).catch(() => {});
+        const unsubscribeFixedArea = desktopApi.settings.onFixedAreaState(updateFixedAreaState);
         const statusTimer = setInterval(refreshBridgeStatus, 5000);
-        window.addEventListener('beforeunload', () => clearInterval(statusTimer));
+        window.addEventListener('beforeunload', () => {
+            clearInterval(statusTimer);
+            unsubscribeFixedArea();
+        });
     </script>
 </body>
 </html>

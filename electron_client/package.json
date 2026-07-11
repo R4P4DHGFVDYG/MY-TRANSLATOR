@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --check main.js && node --check preload.js"
+    "test": "node --test fixed_area.test.js && node --check main.js && node --check preload.js"
   },
   "keywords": [],
   "author": "",
