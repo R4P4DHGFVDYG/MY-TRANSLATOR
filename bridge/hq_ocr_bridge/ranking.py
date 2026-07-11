@@ -26,7 +26,6 @@ COMMON_WORD_FIXES = {
     "LNCLEAN": "UNCLEAN",
     "MLCH": "MUCH",
     "YOL": "YOU",
-    "YAN": "VAN",
 }
 CONTRACTION_FIXES = {
     "ARENT": "AREN'T",
@@ -133,7 +132,6 @@ def rank_ocr_results(results: list[EngineResult]) -> EngineResult | None:
 
 
 def _fix_comic_letter_confusions(text: str) -> str:
-    text = re.sub(r"^\s*[*xX]\s+(?=[(\[]|[A-Z])", "", text)
     text = re.sub(r"\b(?:1a|la|ia)\s+(?=with\b)", "...", text, flags=re.IGNORECASE)
     text = re.sub(r"\b4(?=[oO][uU])", "Y", text)
     text = re.sub(r"\b5[oO]\b", lambda match: _case_like("so", match.group(0)), text)
@@ -172,14 +170,8 @@ def _fix_contractions(text: str) -> str:
         flags=re.IGNORECASE,
     )
     text = re.sub(
-        r"\b(I|you|we|they|he|she|it)\s*'?\s+(m|re|ve|ll|d|s)\b",
-        lambda match: _join_contraction(match.group(1), match.group(2)),
-        text,
-        flags=re.IGNORECASE,
-    )
-    text = re.sub(
-        r"\b([A-Za-z]+)\s*'\s*s\b",
-        lambda match: f"{match.group(1)}'{'S' if match.group(1).isupper() else 's'}",
+        r"\b(I|you|we|they|he|she|it)\s+(m|re|ve|ll|d|s)\b",
+        lambda match: f"{match.group(1)}'{match.group(2)}",
         text,
         flags=re.IGNORECASE,
     )
@@ -228,35 +220,15 @@ def _is_suspicious_mixed_case(word: str) -> bool:
 
 
 def _fix_punctuation(text: str) -> str:
-    text = re.sub(
-        r"^(and),\s+",
-        lambda match: f"{_case_like('...and', match.group(1))} ",
-        text,
-        flags=re.IGNORECASE,
-    )
-    text = re.sub(
-        r"\bokay\.\s+honey\?",
-        lambda match: _case_like("okay, honey?", match.group(0)),
-        text,
-        flags=re.IGNORECASE,
-    )
     text = re.sub(r";\s*7\b", "...", text)
     text = re.sub(r"\(?\bTIS\b", "IT'S", text, flags=re.IGNORECASE)
     text = re.sub(r"\s+([.,!?;:])", r"\1", text)
     text = re.sub(r"([({\[])\s+", r"\1", text)
-    text = re.sub(r"\s+([)}\]])", r"\1", text)
     text = re.sub(r"\.{2,}", "...", text)
     text = re.sub(r";(?=\s*$)", ".", text)
     text = re.sub(r":(?=\s*$)", ".", text)
     text = re.sub(r"\bIT'S(?=\s+HOSTAGE\b)", "ITS", text)
-    if text.startswith("(") and text.count("(") == text.count(")") + 1:
-        text += ")"
     return text
-
-
-def _join_contraction(subject: str, suffix: str) -> str:
-    normalized_suffix = suffix.upper() if subject.isupper() else suffix.lower()
-    return f"{subject}'{normalized_suffix}"
 
 
 def _case_like(value: str, sample: str) -> str:

@@ -44,15 +44,6 @@ def test_normalize_ocr_text_fixes_observed_paddleocr_confusions():
     assert normalize_ocr_text("ROBIN-- JASON TOOD. HAD BEEN") == (
         "ROBIN-- JASON TODD. HAD BEEN"
     )
-    assert normalize_ocr_text("x (Your mom and dad nuzzling noses.") == (
-        "(Your mom and dad nuzzling noses.)"
-    )
-    assert normalize_ocr_text("* (It' S your mom' s yan. )") == (
-        "(It's your mom's van.)"
-    )
-    assert normalize_ocr_text(
-        "and, don't forget to put honey on it, okay. honey?"
-    ) == "...and don't forget to put honey on it, okay, honey?"
 
 
 def test_normalize_ocr_text_keeps_sentence_case_when_not_all_caps():

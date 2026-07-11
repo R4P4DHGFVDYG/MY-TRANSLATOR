@@ -430,8 +430,11 @@ class OcrService:
         confidences: list[float] = []
         for detection in detections:
             payload = _paddleocr_payload(detection)
-            for text, confidence in _ordered_paddleocr_fragments(payload):
-                fragments.append(text)
+            recognized_texts = (
+                str(item).strip() for item in payload.get("rec_texts", [])
+            )
+            fragments.extend(text for text in recognized_texts if text)
+            for confidence in payload.get("rec_scores", []):
                 parsed_confidence = _finite_float(confidence)
                 if parsed_confidence is not None:
                     confidences.append(parsed_confidence)
@@ -656,95 +659,3 @@ def _paddleocr_payload(result: Any) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     return {}
-
-
-def _ordered_paddleocr_fragments(
-    payload: dict[str, Any],
-) -> list[tuple[str, float | None]]:
-    texts = _as_list(payload.get("rec_texts"))
-    scores = _as_list(payload.get("rec_scores"))
-    boxes = _as_list(payload.get("rec_boxes"))
-    fragments: list[dict[str, Any]] = []
-
-    for index, value in enumerate(texts):
-        text = str(value).strip()
-        if not text:
-            continue
-
-        confidence = _finite_float(scores[index]) if index < len(scores) else None
-        alphanumeric = "".join(character for character in text if character.isalnum())
-        if confidence is not None and confidence < 0.5 and len(alphanumeric) <= 1:
-            continue
-
-        box = _axis_aligned_box(boxes[index]) if index < len(boxes) else None
-        fragments.append(
-            {
-                "text": text,
-                "confidence": confidence,
-                "box": box,
-                "index": index,
-            }
-        )
-
-    if not fragments or any(fragment["box"] is None for fragment in fragments):
-        return [
-            (fragment["text"], fragment["confidence"])
-            for fragment in fragments
-        ]
-
-    heights = sorted(
-        max(1.0, fragment["box"][3] - fragment["box"][1])
-        for fragment in fragments
-    )
-    median_height = heights[len(heights) // 2]
-    line_tolerance = max(8.0, median_height * 0.65)
-    lines: list[dict[str, Any]] = []
-
-    for fragment in sorted(
-        fragments,
-        key=lambda item: (
-            (item["box"][1] + item["box"][3]) / 2,
-            item["box"][0],
-        ),
-    ):
-        center_y = (fragment["box"][1] + fragment["box"][3]) / 2
-        if lines and abs(center_y - lines[-1]["center_y"]) <= line_tolerance:
-            line = lines[-1]
-            line["fragments"].append(fragment)
-            line["center_y"] = sum(
-                (item["box"][1] + item["box"][3]) / 2
-                for item in line["fragments"]
-            ) / len(line["fragments"])
-        else:
-            lines.append({"center_y": center_y, "fragments": [fragment]})
-
-    ordered: list[tuple[str, float | None]] = []
-    for line in lines:
-        line["fragments"].sort(key=lambda item: item["box"][0])
-        ordered.extend(
-            (fragment["text"], fragment["confidence"])
-            for fragment in line["fragments"]
-        )
-    return ordered
-
-
-def _as_list(value: Any) -> list[Any]:
-    if value is None or isinstance(value, (str, bytes, dict)):
-        return []
-    try:
-        return list(value)
-    except TypeError:
-        return []
-
-
-def _axis_aligned_box(value: Any) -> tuple[float, float, float, float] | None:
-    coordinates = _as_list(value)
-    if len(coordinates) < 4:
-        return None
-    parsed = [_finite_float(coordinate) for coordinate in coordinates[:4]]
-    if any(coordinate is None for coordinate in parsed):
-        return None
-    left, top, right, bottom = parsed
-    if right <= left or bottom <= top:
-        return None
-    return left, top, right, bottom
