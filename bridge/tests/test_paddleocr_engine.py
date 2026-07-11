@@ -12,6 +12,7 @@ from hq_ocr_bridge.ocr import (
     OcrCancelledError,
     OcrCapacityError,
     OcrService,
+    _ordered_paddleocr_fragments,
 )
 
 
@@ -36,6 +37,31 @@ def test_paddleocr_engine_can_be_requested(monkeypatch):
     assert best is not None
     assert best.text == "HELLO WORLD"
     assert [result.engine for result in results] == ["paddleocr:standard"]
+
+
+def test_paddleocr_fragments_are_sorted_by_visual_reading_order():
+    payload = {
+        "rec_texts": ["and,", "don't forget", "honey", "put", "x", "to"],
+        "rec_scores": [0.99, 0.99, 0.99, 0.99, 0.29, 0.99],
+        "rec_boxes": [
+            [300, 10, 360, 40],
+            [370, 10, 520, 40],
+            [220, 60, 300, 90],
+            [150, 60, 210, 90],
+            [10, 10, 25, 35],
+            [530, 10, 570, 40],
+        ],
+    }
+
+    fragments = _ordered_paddleocr_fragments(payload)
+
+    assert [text for text, _confidence in fragments] == [
+        "and,",
+        "don't forget",
+        "to",
+        "put",
+        "honey",
+    ]
 
 
 def test_ocr_max_variants_limits_easyocr_work(monkeypatch):
