@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from difflib import SequenceMatcher
+import math
 import re
 import string
 
@@ -80,7 +81,7 @@ def text_quality_score(text: str, confidence: float) -> float:
     alpha_ratio = alpha_count / len(chars)
     length_bonus = min(len(normalized) / 80, 1.0)
     word_bonus = min(len(words) / 8, 1.0)
-    confidence = _clamp(float(confidence), 0.0, 1.0)
+    confidence = _bounded_number(confidence)
 
     score = (
         confidence * 0.55
@@ -106,23 +107,28 @@ def rank_ocr_results(results: list[EngineResult]) -> EngineResult | None:
     if not candidates:
         return None
 
-    normalized_by_engine = {
-        result.engine: normalize_ocr_text(result.text).lower() for result in candidates
+    normalized_texts = {
+        id(result): normalize_ocr_text(result.text).lower() for result in candidates
     }
     for result in candidates:
+        result.score = _bounded_number(result.score)
+        result.raw_confidence = _bounded_number(result.raw_confidence)
         for other in candidates:
             if other is result:
                 continue
             similarity = SequenceMatcher(
                 None,
-                normalized_by_engine[result.engine],
-                normalized_by_engine[other.engine],
+                normalized_texts[id(result)],
+                normalized_texts[id(other)],
             ).ratio()
             if similarity >= 0.82:
                 result.score = min(1.0, result.score + 0.08)
                 break
 
-    return max(candidates, key=lambda item: (item.score, item.raw_confidence, len(item.text)))
+    return max(
+        candidates,
+        key=lambda item: (item.score, item.raw_confidence, len(item.text)),
+    )
 
 
 def _fix_comic_letter_confusions(text: str) -> str:
@@ -237,3 +243,13 @@ def _case_like(value: str, sample: str) -> str:
 
 def _clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
+
+
+def _bounded_number(value: object) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(number):
+        return 0.0
+    return _clamp(number, 0.0, 1.0)

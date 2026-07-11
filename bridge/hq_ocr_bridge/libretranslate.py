@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
+from dataclasses import dataclass
+import threading
 from typing import Any
 
 import requests
@@ -8,13 +11,32 @@ from .cache import TTLCache
 from .config import BridgeConfig
 
 
+_ORIGINAL_REQUESTS_GET = requests.get
+_ORIGINAL_REQUESTS_POST = requests.post
+
+
+@dataclass(frozen=True, slots=True)
+class TranslationResult:
+    text: str
+    provider: str | None = None
+    warnings: tuple[str, ...] = ()
+
+
 class LibreTranslateClient:
-    def __init__(self, config: BridgeConfig) -> None:
+    def __init__(
+        self,
+        config: BridgeConfig,
+        session: requests.Session | None = None,
+    ) -> None:
         self.config = config
         self.base_url = config.libretranslate_url.rstrip("/")
-        self._cache = TTLCache()
-        self.last_provider: str | None = None
-        self.last_warnings: list[str] = []
+        self._cache = TTLCache(
+            capacity=config.translation_cache_capacity,
+            ttl_seconds=config.translation_cache_ttl_seconds,
+        )
+        self._session = session or requests.Session()
+        self._inflight_lock = threading.Lock()
+        self._inflight: dict[tuple[Any, ...], Future[TranslationResult]] = {}
 
     def health(self) -> dict[str, Any]:
         libretranslate = (
@@ -44,18 +66,53 @@ class LibreTranslateClient:
         }
 
     def translate(self, text: str, source: str = "en", target: str = "pt-BR") -> str:
-        self.last_provider = None
-        self.last_warnings = []
+        """Translate text while retaining the legacy string-only API."""
+        return self.translate_result(text, source=source, target=target).text
+
+    def translate_result(
+        self, text: str, source: str = "en", target: str = "pt-BR"
+    ) -> TranslationResult:
+        """Translate text and return request-local provider metadata.
+
+        Metadata lives in an immutable result rather than on the client instance so
+        concurrent requests cannot report each other's provider or warnings.
+        """
+        if not isinstance(text, str):
+            raise ValueError("text must be a string")
         if not text.strip() or source == target:
-            self.last_provider = "none"
-            return text
+            return TranslationResult(text=text, provider="none")
 
         cache_key = (self.config.translation_providers, source, target, text)
         cached = self._cache.get(cache_key)
         if isinstance(cached, str):
-            self.last_provider = "cache"
-            return cached
+            return TranslationResult(text=cached, provider="cache")
 
+        with self._inflight_lock:
+            pending = self._inflight.get(cache_key)
+            is_owner = pending is None
+            if pending is None:
+                pending = Future()
+                self._inflight[cache_key] = pending
+
+        if not is_owner:
+            return pending.result()
+
+        try:
+            result = self._translate_uncached(text, source, target)
+            self._cache.set(cache_key, result.text)
+            pending.set_result(result)
+            return result
+        except Exception as exc:
+            pending.set_exception(exc)
+            raise
+        finally:
+            with self._inflight_lock:
+                if self._inflight.get(cache_key) is pending:
+                    self._inflight.pop(cache_key, None)
+
+    def _translate_uncached(
+        self, text: str, source: str, target: str
+    ) -> TranslationResult:
         errors: list[str] = []
         for provider in self.config.translation_providers:
             try:
@@ -72,21 +129,24 @@ class LibreTranslateClient:
                 errors.append(f"{provider}: {exc}")
                 continue
 
-            self.last_provider = provider
-            self.last_warnings = errors.copy()
-            self._cache.set(cache_key, translated)
-            return translated
+            return TranslationResult(
+                text=translated,
+                provider=provider,
+                warnings=tuple(errors),
+            )
 
         raise RuntimeError("Translation failed: " + "; ".join(errors))
 
     def _libretranslate_health(self) -> dict[str, Any]:
         try:
-            response = requests.get(
+            response = self._http_get(
                 f"{self.base_url}/languages",
                 timeout=self.config.request_timeout_seconds,
             )
             response.raise_for_status()
             languages = response.json()
+            if not isinstance(languages, list):
+                raise RuntimeError("LibreTranslate returned an invalid languages response")
             return {
                 "ok": True,
                 "url": self.base_url,
@@ -105,7 +165,7 @@ class LibreTranslateClient:
 
     def _translate_google(self, text: str, source: str, target: str) -> str:
         try:
-            response = requests.get(
+            response = self._http_get(
                 self.config.google_translate_url,
                 params={
                     "client": "gtx",
@@ -120,7 +180,7 @@ class LibreTranslateClient:
             payload = response.json()
         except requests.RequestException as exc:
             raise RuntimeError(f"Google Translate request failed: {exc}") from exc
-        except ValueError as exc:
+        except Exception as exc:
             raise RuntimeError("Google Translate returned invalid JSON") from exc
 
         translated = _parse_google_payload(payload)
@@ -133,7 +193,7 @@ class LibreTranslateClient:
             raise RuntimeError("DEEPL_AUTH_KEY is not configured")
 
         try:
-            response = requests.post(
+            response = self._http_post(
                 self.config.deepl_api_url,
                 data={
                     "text": text,
@@ -147,20 +207,25 @@ class LibreTranslateClient:
             payload = response.json()
         except requests.RequestException as exc:
             raise RuntimeError(f"DeepL request failed: {exc}") from exc
-        except ValueError as exc:
+        except Exception as exc:
             raise RuntimeError("DeepL returned invalid JSON") from exc
 
+        if not isinstance(payload, dict):
+            raise RuntimeError("DeepL returned an invalid response")
         translations = payload.get("translations")
         if not isinstance(translations, list) or not translations:
             raise RuntimeError("DeepL response did not include translations")
-        translated = translations[0].get("text")
+        first_translation = translations[0]
+        if not isinstance(first_translation, dict):
+            raise RuntimeError("DeepL response did not include a translation object")
+        translated = first_translation.get("text")
         if not isinstance(translated, str):
             raise RuntimeError("DeepL response did not include text")
         return translated
 
     def _translate_libretranslate(self, text: str, source: str, target: str) -> str:
         try:
-            response = requests.post(
+            response = self._http_post(
                 f"{self.base_url}/translate",
                 json={
                     "q": text,
@@ -174,14 +239,28 @@ class LibreTranslateClient:
             payload = response.json()
         except requests.RequestException as exc:
             raise RuntimeError(f"LibreTranslate request failed: {exc}") from exc
-        except ValueError as exc:
+        except Exception as exc:
             raise RuntimeError("LibreTranslate returned invalid JSON") from exc
 
+        if not isinstance(payload, dict):
+            raise RuntimeError("LibreTranslate returned an invalid response")
         translated = payload.get("translatedText")
         if not isinstance(translated, str):
             raise RuntimeError("LibreTranslate response did not include translatedText")
 
         return translated
+
+    def _http_get(self, *args: Any, **kwargs: Any):
+        # Keep module-level monkeypatching compatible for existing integrations
+        # while using a persistent connection pool in normal operation.
+        if requests.get is not _ORIGINAL_REQUESTS_GET:
+            return requests.get(*args, **kwargs)
+        return self._session.get(*args, **kwargs)
+
+    def _http_post(self, *args: Any, **kwargs: Any):
+        if requests.post is not _ORIGINAL_REQUESTS_POST:
+            return requests.post(*args, **kwargs)
+        return self._session.post(*args, **kwargs)
 
 
 def _provider_usable(name: str, providers: dict[str, dict[str, Any]]) -> bool:

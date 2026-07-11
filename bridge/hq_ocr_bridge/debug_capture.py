@@ -9,7 +9,7 @@ from uuid import uuid4
 from PIL import Image
 
 from .config import BridgeConfig
-from .image_utils import preprocess_for_ocr, preprocess_variants_for_ocr
+from .image_utils import preprocess_variants_for_ocr
 
 
 class DebugCapture:
@@ -26,8 +26,9 @@ class DebugCapture:
         self.directory.mkdir(parents=True, exist_ok=False)
 
         crop.save(self.directory / "crop.png")
-        preprocess_for_ocr(crop).save(self.directory / "ocr-preprocessed.png")
-        for variant_name, variant_image in preprocess_variants_for_ocr(crop):
+        variants = preprocess_variants_for_ocr(crop)
+        variants[0][1].save(self.directory / "ocr-preprocessed.png")
+        for variant_name, variant_image in variants:
             variant_image.save(self.directory / f"ocr-preprocessed-{variant_name}.png")
         self._write_json(
             "request.json",
@@ -45,10 +46,9 @@ class DebugCapture:
         )
 
     def to_dict(self) -> dict[str, str]:
-        return {
-            "id": self.id,
-            "directory": str(self.directory),
-        }
+        # The capture directory is intentionally not exposed through the API.
+        # It can reveal the local user name and filesystem layout to a caller.
+        return {"id": self.id}
 
     def save_response(self, response: dict[str, Any], status_code: int = 200) -> None:
         self._write_json(
@@ -68,7 +68,9 @@ class DebugCapture:
 
 
 def debug_capture_requested(config: BridgeConfig, payload: dict[str, Any]) -> bool:
-    return config.save_debug_captures or _truthy(payload.get("debug"))
+    return config.save_debug_captures or (
+        config.allow_request_debug_captures and _truthy(payload.get("debug"))
+    )
 
 
 def _truthy(value: Any) -> bool:

@@ -20,7 +20,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 Instalar OCR real, quando for testar o pipeline completo:
 
 ```powershell
-pip install -r requirements-ocr.txt
+pip install -r requirements-ocr.txt -r requirements-paddleocr.txt
 ```
 
 O Tesseract tambem precisa estar instalado no Windows e disponivel no `PATH`; `pytesseract` e apenas o wrapper Python.
@@ -53,17 +53,59 @@ $env:HQ_OCR_DEBUG_CAPTURE_DIR = "debug-captures"
 .\.venv\Scripts\python.exe -m hq_ocr_bridge
 ```
 
-Tambem da para ativar por chamada marcando "Salvar recortes OCR" nas opcoes da extensao.
+Para permitir que a opcao "Salvar recortes OCR" da extensao ative capturas por chamada,
+habilite-a explicitamente no bridge:
 
-## LibreTranslate
-
-O bridge espera LibreTranslate em:
-
-```text
-http://127.0.0.1:5000
+```powershell
+$env:HQ_OCR_ALLOW_REQUEST_DEBUG_CAPTURES = "true"
 ```
 
-O endpoint `/health` do bridge mostra se o LibreTranslate esta acessivel e quais OCRs estao disponiveis.
+Mantenha essa opcao desligada em uso normal: os recortes podem conter texto sensivel.
+
+O perfil rapido agora e o padrao: PaddleOCR mobile, uma variante, cache de OCR e aquecimento em segundo plano. Para sobrescrever explicitamente os valores:
+
+```powershell
+$env:HQ_OCR_FORCE_ENGINES = "true"
+$env:HQ_OCR_DEFAULT_ENGINES = "paddleocr"
+$env:HQ_OCR_PADDLEOCR_DETECTION_MODEL = "PP-OCRv5_mobile_det"
+$env:HQ_OCR_PADDLEOCR_RECOGNITION_MODEL = "en_PP-OCRv5_mobile_rec"
+$env:HQ_OCR_PADDLEOCR_MAX_PIXELS = "500000"
+$env:HQ_OCR_MAX_VARIANTS = "1"
+$env:HQ_OCR_ENGINE_TIMEOUT_SECONDS = "8"
+$env:HQ_OCR_WARMUP_ON_START = "true"
+.\.venv\Scripts\python.exe -m hq_ocr_bridge
+```
+
+MKL-DNN permanece desligado por padrao porque apresentou falha neste ambiente. Ative `HQ_OCR_PADDLEOCR_ENABLE_MKLDNN=true` somente depois de validar a CPU local.
+
+Para comparar qualidade contra velocidade, troque `HQ_OCR_DEFAULT_ENGINES` para `paddleocr,easyocr`, aumente `HQ_OCR_MAX_VARIANTS` e adicione:
+
+```powershell
+$env:HQ_OCR_PARALLEL_ENGINES = "true"
+```
+
+Prontidao e metricas:
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8765/ready
+```
+
+O bridge registra uma linha `[performance]` por requisicao sem incluir imagem nem texto. A resposta do endpoint de traducao inclui tempos por etapa e informa se os caches de OCR/traducao foram usados. Os controles principais sao `HQ_OCR_CACHE_CAPACITY`, `HQ_OCR_CACHE_TTL_SECONDS`, `HQ_OCR_TRANSLATION_CACHE_CAPACITY`, `HQ_OCR_TRANSLATION_CACHE_TTL_SECONDS` e `HQ_OCR_LOG_PERFORMANCE`.
+
+## Traducao
+
+Por padrao, o bridge tenta os provedores configurados em
+`HQ_OCR_TRANSLATION_PROVIDERS` (atualmente `deepl,google`). O endpoint `/health`
+informa o provedor efetivamente disponivel.
+
+Para usar exclusivamente um LibreTranslate local, configure antes de iniciar o bridge:
+
+```powershell
+$env:HQ_OCR_TRANSLATION_PROVIDERS = "libretranslate"
+$env:HQ_OCR_LIBRETRANSLATE_URL = "http://127.0.0.1:5000"
+```
+
+O endpoint `/health` tambem mostra os OCRs disponiveis.
 
 ## Extensao
 
@@ -84,6 +126,8 @@ node --check .\extension\background.js
 node --check .\extension\contentScript.js
 node --check .\extension\popup.js
 node --check .\extension\options.js
+node --check .\extension\shared.js
+npm --prefix .\extension test
 ```
 
 Esses checks validam sintaxe, nao substituem teste manual no navegador.

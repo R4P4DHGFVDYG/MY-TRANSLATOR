@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G.R.C TRANSLATOR</title>
+    <link rel="icon" href="assets/spider-intro.png" type="image/png">
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0d0718;
+            --surface: rgba(27, 16, 45, 0.9);
+            --surface-strong: rgba(38, 23, 61, 0.96);
+            --surface-soft: rgba(255, 255, 255, 0.045);
+            --border: rgba(196, 173, 239, 0.17);
+            --border-bright: rgba(180, 154, 255, 0.34);
+            --text: #faf7ff;
+            --muted: #aa9dbc;
+            --purple: #b49aff;
+            --purple-strong: #8f68ff;
+            --violet: #6d3fe3;
+            --success: #54e6a3;
+            --warning: #ffce73;
+            --danger: #ff7389;
+            --shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            padding: 10px;
+            color: var(--text);
+            background: transparent;
+            font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+            user-select: none;
+        }
+
+        button,
+        select,
+        input {
+            font: inherit;
+        }
+
+        button,
+        select,
+        input[type="range"],
+        input[type="color"] {
+            -webkit-app-region: no-drag;
+        }
+
+        .app-shell {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 0;
+            background:
+                radial-gradient(circle at 12% -8%, rgba(180, 154, 255, 0.22), transparent 36%),
+                radial-gradient(circle at 93% 10%, rgba(109, 63, 227, 0.2), transparent 34%),
+                linear-gradient(150deg, rgba(20, 11, 35, 0.98), rgba(9, 5, 18, 0.98));
+            box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.045);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+        }
+
+        .app-shell::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: 0.2;
+            background-image: linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px);
+            background-size: 32px 32px;
+            mask-image: linear-gradient(to bottom, black, transparent 58%);
+        }
+
+        .titlebar {
+            position: relative;
+            z-index: 3;
+            height: 72px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px 0 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+            -webkit-app-region: drag;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-mark {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+        }
+
+        .brand-mark img {
+            width: 32px;
+            height: 38px;
+            object-fit: contain;
+            filter: drop-shadow(0 0 7px rgba(180, 154, 255, 0.72));
+        }
+
+        .brand-name {
+            font-size: 15px;
+            font-weight: 750;
+            letter-spacing: 0.075em;
+        }
+
+        .brand-name span {
+            color: var(--purple);
+        }
+
+        .brand-subtitle {
+            margin-top: 2px;
+            color: var(--muted);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.13em;
+            text-transform: uppercase;
+        }
+
+        .window-actions {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            -webkit-app-region: no-drag;
+        }
+
+        .window-button {
+            width: 34px;
+            height: 30px;
+            display: grid;
+            place-items: center;
+            border: 1px solid transparent;
+            border-radius: 0;
+            color: #8fa3b9;
+            background: transparent;
+            cursor: pointer;
+            transition: 150ms ease;
+        }
+
+        .window-button:hover {
+            color: var(--text);
+            border-color: var(--border);
+            background: rgba(255,255,255,0.07);
+        }
+
+        .window-button.close:hover {
+            color: white;
+            border-color: rgba(255, 115, 137, 0.4);
+            background: rgba(255, 76, 105, 0.75);
+        }
+
+        .window-button svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .content {
+            position: relative;
+            z-index: 2;
+            height: calc(100% - 72px);
+            overflow-y: auto;
+            padding: 20px 22px 18px;
+        }
+
+        .content::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .content::-webkit-scrollbar-thumb {
+            border-radius: 0;
+            background: rgba(142, 161, 184, 0.24);
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 18px;
+            min-height: 126px;
+            margin-bottom: 14px;
+            padding: 20px;
+            overflow: hidden;
+            border: 1px solid var(--border-bright);
+            border-radius: 0;
+            background:
+                linear-gradient(110deg, rgba(180, 154, 255, 0.13), rgba(109, 63, 227, 0.09)),
+                rgba(20, 11, 35, 0.78);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        }
+
+        .eyebrow {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            color: var(--purple);
+            font-size: 10px;
+            font-weight: 750;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+        }
+
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--warning);
+            box-shadow: 0 0 12px currentColor;
+        }
+
+        .status-dot.ready {
+            color: var(--success);
+            background: var(--success);
+        }
+
+        .status-dot.warming {
+            color: var(--warning);
+            background: var(--warning);
+            animation: pulse 1.25s infinite;
+        }
+
+        .status-dot.offline {
+            color: var(--danger);
+            background: var(--danger);
+        }
+
+        .hero h1 {
+            max-width: 290px;
+            font-size: 23px;
+            line-height: 1.15;
+            letter-spacing: -0.035em;
+        }
+
+        .hero p {
+            max-width: 310px;
+            margin-top: 7px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .capture-button {
+            min-width: 142px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            padding: 0 16px;
+            border: 0;
+            border-radius: 0;
+            color: #160b26;
+            background: linear-gradient(135deg, #c7b4ff, #a47fff 58%, #7042e8 145%);
+            box-shadow: 0 12px 30px rgba(143, 104, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.6);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 800;
+            transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease;
+        }
+
+        .capture-button:hover {
+            transform: translateY(-2px);
+            filter: brightness(1.05);
+            box-shadow: 0 16px 34px rgba(143, 104, 255, 0.42);
+        }
+
+        .capture-button:active {
+            transform: translateY(0);
+        }
+
+        .capture-button svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .panel {
+            margin-bottom: 12px;
+            padding: 16px;
+            border: 1px solid var(--border);
+            border-radius: 0;
+            background: linear-gradient(145deg, rgba(38, 23, 61, 0.8), rgba(20, 11, 35, 0.82));
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+        }
+
+        .panel-heading {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .panel-icon {
+            width: 30px;
+            height: 30px;
+            display: grid;
+            place-items: center;
+            border-radius: 0;
+            color: var(--purple);
+            background: rgba(180, 154, 255, 0.1);
+            border: 1px solid rgba(180, 154, 255, 0.16);
+        }
+
+        .panel-icon svg {
+            width: 15px;
+            height: 15px;
+        }
+
+        .panel-title {
+            font-size: 13px;
+            font-weight: 720;
+        }
+
+        .panel-description {
+            margin-top: 2px;
+            color: var(--muted);
+            font-size: 10px;
+        }
+
+        .field-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .field-grid.single {
+            grid-template-columns: 1fr;
+        }
+
+        .field label,
+        .field-label-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 7px;
+            color: #aec0d3;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.055em;
+            text-transform: uppercase;
+        }
+
+        .value-badge {
+            padding: 2px 7px;
+            border: 1px solid rgba(180, 154, 255, 0.2);
+            border-radius: 0;
+            color: var(--purple);
+            background: rgba(180, 154, 255, 0.08);
+            font-size: 9px;
+            letter-spacing: 0;
+        }
+
+        select {
+            width: 100%;
+            height: 40px;
+            padding: 0 34px 0 12px;
+            border: 1px solid rgba(151, 182, 218, 0.14);
+            border-radius: 0;
+            outline: none;
+            color: var(--text);
+            background-color: rgba(4, 12, 23, 0.62);
+            cursor: pointer;
+            font-size: 12px;
+            transition: 150ms ease;
+        }
+
+        select:hover,
+        select:focus {
+            border-color: rgba(180, 154, 255, 0.48);
+            box-shadow: 0 0 0 3px rgba(180, 154, 255, 0.08);
+        }
+
+        .color-field {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 5px 10px 5px 6px;
+            border: 1px solid rgba(151, 182, 218, 0.14);
+            border-radius: 0;
+            background: rgba(4, 12, 23, 0.62);
+        }
+
+        input[type="color"] {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            overflow: hidden;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+
+        input[type="color"]::-webkit-color-swatch {
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 0;
+        }
+
+        .color-value {
+            color: #becbd9;
+            font-family: "Cascadia Mono", Consolas, monospace;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .range-wrap {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            padding: 0 4px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 4px;
+            appearance: none;
+            border-radius: 0;
+            outline: none;
+            background: linear-gradient(90deg, var(--purple) 90%, rgba(196, 173, 239, 0.2) 90%);
+            cursor: pointer;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            width: 16px;
+            height: 16px;
+            appearance: none;
+            border: 3px solid #0b1929;
+            border-radius: 50%;
+            background: var(--purple);
+            box-shadow: 0 0 0 1px rgba(180, 154, 255, 0.62), 0 0 15px rgba(143, 104, 255, 0.45);
+        }
+
+        .shortcut-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: end;
+            gap: 12px;
+        }
+
+        .keycaps {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        kbd {
+            min-width: 25px;
+            height: 25px;
+            display: grid;
+            place-items: center;
+            padding: 0 7px;
+            border: 1px solid rgba(151, 182, 218, 0.22);
+            border-bottom-color: rgba(151, 182, 218, 0.4);
+            border-radius: 0;
+            color: #c9d7e5;
+            background: rgba(255,255,255,0.06);
+            box-shadow: 0 2px 0 rgba(0,0,0,0.35);
+            font-size: 9px;
+            font-weight: 750;
+        }
+
+        .footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 2px 2px;
+            color: #71849b;
+            font-size: 9px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .footer-chip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .footer-chip::before {
+            content: "";
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        @keyframes pulse {
+            50% { opacity: 0.4; transform: scale(0.82); }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <header class="titlebar">
+            <div class="brand">
+                <div class="brand-mark" aria-hidden="true">
+                    <img src="assets/spider-intro.png" alt="">
+                </div>
+                <div>
+                    <div class="brand-name"><span>G.R.C</span> TRANSLATOR</div>
+                    <div class="brand-subtitle">É o tradutor do guri nao tem jeito</div>
+                </div>
+            </div>
+            <div class="window-actions">
+                <button class="window-button" id="minimizeButton" type="button" aria-label="Minimizar">
+                    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M3 8.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
+                <button class="window-button close" id="closeButton" type="button" aria-label="Fechar">
+                    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="m4 4 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="content">
+            <section class="hero">
+                <div>
+                    <div class="eyebrow">
+                        <span class="status-dot warming" id="statusDot"></span>
+                        <span id="statusLabel">Verificando o bridge</span>
+                    </div>
+                    <h1>Tradutor desenvolvido para desktop, com foco em jogos.</h1>
+                    <p>Selecione a área que deseja traduzir usando o botão ou o atalho de sua preferência.
+</p>
+                </div>
+                <button class="capture-button" id="captureButton" type="button">
+                    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <path d="M7 3H4a1 1 0 0 0-1 1v3m10-4h3a1 1 0 0 1 1 1v3M7 17H4a1 1 0 0 1-1-1v-3m10 4h3a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                        <path d="M7 10h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                    </svg>
+                    Capturar agora
+                </button>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div class="panel-icon">
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M3 5h9M7.5 3v2c0 4-1.7 6.8-4.5 8.8M5.3 9.5c1.1 1.4 2.4 2.5 4 3.3M11 17l3.2-8 3.2 8m-5.2-3h4" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="panel-title">Idiomas</div>
+                        <div class="panel-description">Origem do OCR e idioma de saída</div>
+                    </div>
+                </div>
+                <div class="field-grid">
+                    <div class="field">
+                        <label for="source">Idioma detectado</label>
+                        <select id="source">
+                            <option value="en">Inglês</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="target">Traduzir para</label>
+                        <select id="target">
+                            <option value="pt-BR" selected>Português (Brasil)</option>
+                            <option value="en">Inglês</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div class="panel-icon">
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M10 3a7 7 0 1 0 0 14h1.1c.9 0 1.3-1.1.7-1.7-.7-.7-.2-1.8.8-1.8H15a2 2 0 0 0 2-2V10a7 7 0 0 0-7-7Z" stroke="currentColor" stroke-width="1.45"/>
+                            <circle cx="6.5" cy="9" r="1" fill="currentColor"/><circle cx="9" cy="6.5" r="1" fill="currentColor"/><circle cx="13" cy="7.5" r="1" fill="currentColor"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="panel-title">Aparência da legenda</div>
+                        <div class="panel-description">Posição, cores e transparência</div>
+                    </div>
+                </div>
+                <div class="field-grid single" style="margin-bottom: 12px;">
+                    <div class="field">
+                        <label for="position">Posição na tela</label>
+                        <select id="position">
+                            <option value="custom" selected>Personalizada — arraste a legenda</option>
+                            <option value="mouse">Perto do mouse</option>
+                            <option value="top">Topo da tela</option>
+                            <option value="bottom">Rodapé da tela</option>
+                            <option value="center">Centro da tela</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="field-grid" style="margin-bottom: 12px;">
+                    <div class="field">
+                        <label for="textColor">Texto</label>
+                        <div class="color-field">
+                            <input type="color" id="textColor" value="#ffffff">
+                            <span class="color-value" id="textColorValue">#FFFFFF</span>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="bgColor">Fundo</label>
+                        <div class="color-field">
+                            <input type="color" id="bgColor" value="#160d26">
+                            <span class="color-value" id="bgColorValue">#160D26</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="field">
+                    <div class="field-label-row">
+                        <label for="opacity" style="margin:0">Opacidade do fundo</label>
+                        <span class="value-badge" id="opacityValue">94%</span>
+                    </div>
+                    <div class="range-wrap">
+                        <input type="range" id="opacity" min="10" max="100" value="94">
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div class="panel-icon">
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M10 2.8c-3.6 0-5.5 2-5.5 5.4v3.4c0 3.5 2 5.6 5.5 5.6s5.5-2.1 5.5-5.6V8.2c0-3.4-1.9-5.4-5.5-5.4Z" stroke="currentColor" stroke-width="1.45"/>
+                            <path d="M10 3v5.5m-2.3 0h4.6" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="panel-title">Atalho de captura</div>
+                        <div class="panel-description">Escolha o botão mais rápido durante o jogo</div>
+                    </div>
+                </div>
+                <div class="shortcut-row">
+                    <div class="field">
+                        <label for="mouseShortcut">Atalho principal</label>
+                        <select id="mouseShortcut">
+                            <option value="XBUTTON1" selected>Botão lateral 1 — voltar</option>
+                            <option value="XBUTTON2">Botão lateral 2 — avançar</option>
+                            <option value="disabled">Somente teclado</option>
+                        </select>
+                    </div>
+                    <div class="keycaps" aria-label="Atalho de teclado alternativo">
+                        <kbd>CTRL</kbd><kbd>SHIFT</kbd><kbd>Q</kbd>
+                    </div>
+                </div>
+            </section>
+
+            <footer class="footer">
+                <span>G.R.C Translator · v1.0</span>
+                <span class="footer-chip">Processamento local</span>
+            </footer>
+        </main>
+    </div>
+
+    <script>
+        const desktopApi = window.ocrDesktop;
+        const settingIds = ['source', 'target', 'position', 'textColor', 'bgColor', 'opacity', 'mouseShortcut'];
+
+        function updateVisualValues() {
+            const opacity = document.getElementById('opacity');
+            const percentage = Number(opacity.value);
+            document.getElementById('opacityValue').textContent = `${percentage}%`;
+            opacity.style.background = `linear-gradient(90deg, var(--purple) ${percentage}%, rgba(196, 173, 239, 0.2) ${percentage}%)`;
+
+            for (const id of ['textColor', 'bgColor']) {
+                document.getElementById(`${id}Value`).textContent = document.getElementById(id).value.toUpperCase();
+            }
+        }
+
+        function saveSettings() {
+            updateVisualValues();
+            desktopApi.settings.update({
+                sourceLang: document.getElementById('source').value,
+                targetLang: document.getElementById('target').value,
+                position: document.getElementById('position').value,
+                textColor: document.getElementById('textColor').value,
+                bgColor: document.getElementById('bgColor').value,
+                opacity: document.getElementById('opacity').value / 100,
+                mouseShortcutButton: document.getElementById('mouseShortcut').value
+            });
+        }
+
+        async function refreshBridgeStatus() {
+            const dot = document.getElementById('statusDot');
+            const label = document.getElementById('statusLabel');
+            try {
+                const status = await desktopApi.settings.getBridgeStatus();
+                dot.className = `status-dot ${status.state}`;
+                label.textContent = status.label;
+            } catch {
+                dot.className = 'status-dot offline';
+                label.textContent = 'Bridge desconectado';
+            }
+        }
+
+        for (const id of settingIds) {
+            const element = document.getElementById(id);
+            element.addEventListener(element.type === 'range' ? 'input' : 'change', saveSettings);
+        }
+
+        document.getElementById('minimizeButton').addEventListener('click', () => desktopApi.settings.minimize());
+        document.getElementById('closeButton').addEventListener('click', () => desktopApi.settings.close());
+        document.getElementById('captureButton').addEventListener('click', () => desktopApi.settings.capture());
+
+        saveSettings();
+        refreshBridgeStatus();
+        const statusTimer = setInterval(refreshBridgeStatus, 5000);
+        window.addEventListener('beforeunload', () => clearInterval(statusTimer));
+    </script>
+</body>
+</html>

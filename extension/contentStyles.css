@@ -5,6 +5,8 @@
   cursor: crosshair;
   background: rgba(10, 15, 20, 0.22);
   user-select: none;
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 
 .hq-ocr-selection-box {

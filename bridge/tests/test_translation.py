@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import FrozenInstanceError
+import threading
+import time
+
+import pytest
 import requests
 
 from hq_ocr_bridge.config import BridgeConfig
-from hq_ocr_bridge.libretranslate import LibreTranslateClient
+from hq_ocr_bridge.libretranslate import LibreTranslateClient, TranslationResult
 
 
 class FakeResponse:
@@ -32,9 +38,43 @@ def test_google_translate_provider_uses_pt_br(monkeypatch):
         BridgeConfig(translation_providers=("google",), request_timeout_seconds=1)
     )
 
+    result = client.translate_result("HELLO WORLD", "en", "pt-BR")
+
+    assert result == TranslationResult(text="OLA MUNDO", provider="google")
+    with pytest.raises(FrozenInstanceError):
+        result.provider = "deepl"  # type: ignore[misc]
     assert client.translate("HELLO WORLD", "en", "pt-BR") == "OLA MUNDO"
-    assert client.last_provider == "google"
-    assert client.last_warnings == []
+
+
+def test_identical_concurrent_translations_share_one_http_request(monkeypatch):
+    calls = 0
+    calls_lock = threading.Lock()
+    start_barrier = threading.Barrier(2)
+
+    def fake_get(url, params, timeout):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        time.sleep(0.05)
+        return FakeResponse([[["OLA MUNDO", "HELLO WORLD"]]])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    client = LibreTranslateClient(
+        BridgeConfig(
+            translation_providers=("google",),
+            request_timeout_seconds=1,
+        )
+    )
+
+    def translate():
+        start_barrier.wait()
+        return client.translate("HELLO WORLD", "en", "pt-BR")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: translate(), range(2)))
+
+    assert results == ["OLA MUNDO", "OLA MUNDO"]
+    assert calls == 1
 
 
 def test_google_falls_back_to_deepl_with_pt_br(monkeypatch):
@@ -57,9 +97,11 @@ def test_google_falls_back_to_deepl_with_pt_br(monkeypatch):
         )
     )
 
-    assert client.translate("HELLO WORLD", "en", "pt-BR") == "OLA MUNDO"
-    assert client.last_provider == "deepl"
-    assert len(client.last_warnings) == 1
+    result = client.translate_result("HELLO WORLD", "en", "pt-BR")
+
+    assert result.text == "OLA MUNDO"
+    assert result.provider == "deepl"
+    assert len(result.warnings) == 1
 
 
 def test_deepl_is_used_first_with_key(monkeypatch):
@@ -82,9 +124,11 @@ def test_deepl_is_used_first_with_key(monkeypatch):
         )
     )
 
-    assert client.translate("HELLO WORLD", "en", "pt-BR") == "OLA MUNDO"
-    assert client.last_provider == "deepl"
-    assert client.last_warnings == []
+    result = client.translate_result("HELLO WORLD", "en", "pt-BR")
+
+    assert result.text == "OLA MUNDO"
+    assert result.provider == "deepl"
+    assert result.warnings == ()
 
 
 def test_pt_alias_is_normalized_to_brazilian_portuguese(monkeypatch):
@@ -116,3 +160,27 @@ def test_health_does_not_probe_disabled_libretranslate(monkeypatch):
     assert health["ok"] is True
     assert health["order"] == ["deepl", "google"]
     assert health["libretranslate"]["disabled"] is True
+
+
+def test_malformed_provider_response_falls_back_to_next_provider(monkeypatch):
+    def fake_post(url, data=None, json=None, headers=None, timeout=None):
+        return FakeResponse([])
+
+    def fake_get(url, params, timeout):
+        return FakeResponse([[["OLA MUNDO", "HELLO WORLD"]]])
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    client = LibreTranslateClient(
+        BridgeConfig(
+            translation_providers=("deepl", "google"),
+            deepl_auth_key="test-key",
+        )
+    )
+
+    result = client.translate_result("HELLO WORLD")
+
+    assert result.text == "OLA MUNDO"
+    assert result.provider == "google"
+    assert result.warnings == ("deepl: DeepL returned an invalid response",)

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>G.R.C TRANSLATOR — Captura</title>
+    <link rel="icon" href="assets/spider-intro.png" type="image/png">
+    <style>
+        * { box-sizing: border-box; }
+        body, html {
+            margin: 0; padding: 0; width: 100vw; height: 100vh;
+            overflow: hidden; cursor: crosshair; background: transparent;
+            font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        }
+        canvas {
+            position: absolute; top: 0; left: 0;
+        }
+        .capture-hint {
+            position: fixed;
+            z-index: 2;
+            top: 26px;
+            left: 50%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px 10px 10px;
+            border: 1px solid rgba(180, 154, 255, 0.38);
+            border-radius: 0;
+            color: #f0eaff;
+            background: rgba(18, 9, 31, 0.9);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.09);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            transform: translateX(-50%);
+            pointer-events: none;
+        }
+        .hint-mark {
+            width: 29px;
+            height: 29px;
+            display: grid;
+            place-items: center;
+        }
+        .hint-mark img {
+            width: 21px;
+            height: 25px;
+            object-fit: contain;
+            filter: drop-shadow(0 0 5px rgba(180, 154, 255, 0.72));
+        }
+        .hint-copy strong {
+            display: block;
+            margin-bottom: 2px;
+            font-size: 11px;
+            letter-spacing: 0.03em;
+        }
+        .hint-copy span {
+            color: #8ea1b8;
+            font-size: 9px;
+        }
+        .key {
+            margin-left: 5px;
+            padding: 2px 6px;
+            border: 1px solid rgba(151,182,218,0.22);
+            border-radius: 0;
+            color: #c8d5e3;
+            background: rgba(255,255,255,0.06);
+            font-size: 8px;
+            font-weight: 700;
+        }
+        .dimension-badge {
+            position: fixed;
+            z-index: 3;
+            display: none;
+            padding: 5px 9px;
+            border: 1px solid rgba(180,154,255,0.34);
+            border-radius: 0;
+            color: #f0eaff;
+            background: rgba(18,9,31,0.92);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.35);
+            font-family: "Cascadia Mono", Consolas, monospace;
+            font-size: 9px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="overlay"></canvas>
+    <div class="capture-hint">
+        <span class="hint-mark"><img src="assets/spider-intro.png" alt=""></span>
+        <span class="hint-copy">
+            <strong>Selecione o texto para traduzir</strong>
+            <span>Arraste sobre a área desejada <span class="key">ESC</span> cancela</span>
+        </span>
+    </div>
+    <div class="dimension-badge" id="dimensionBadge"></div>
+    
+    <script>
+        const desktopApi = window.ocrDesktop;
+        const overlayCanvas = document.getElementById('overlay');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        const dimensionBadge = document.getElementById('dimensionBadge');
+        
+        let isDragging = false;
+        let startX, startY;
+
+        function resize() {
+            overlayCanvas.width = window.innerWidth;
+            overlayCanvas.height = window.innerHeight;
+            drawOverlay();
+        }
+        window.onresize = resize;
+        resize();
+
+        function drawOverlay(rect = null) {
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            overlayCtx.fillStyle = 'rgba(10, 5, 18, 0.6)';
+            overlayCtx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            
+            if (rect) {
+                overlayCtx.clearRect(rect.x, rect.y, rect.w, rect.h);
+                overlayCtx.save();
+                overlayCtx.shadowColor = 'rgba(180, 154, 255, 0.82)';
+                overlayCtx.shadowBlur = 12;
+                overlayCtx.strokeStyle = '#b49aff';
+                overlayCtx.lineWidth = 2;
+                overlayCtx.strokeRect(rect.x + 1, rect.y + 1, Math.max(0, rect.w - 2), Math.max(0, rect.h - 2));
+                overlayCtx.restore();
+
+                const badgeX = Math.min(window.innerWidth - 90, Math.max(8, rect.x + rect.w - 74));
+                const badgeY = Math.min(window.innerHeight - 32, Math.max(8, rect.y + rect.h + 8));
+                dimensionBadge.textContent = `${Math.round(rect.w)} × ${Math.round(rect.h)}`;
+                dimensionBadge.style.left = `${badgeX}px`;
+                dimensionBadge.style.top = `${badgeY}px`;
+                dimensionBadge.style.display = 'block';
+            } else {
+                dimensionBadge.style.display = 'none';
+            }
+        }
+
+        document.addEventListener('mousedown', e => {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (!isDragging) return;
+            const x = Math.min(startX, e.clientX);
+            const y = Math.min(startY, e.clientY);
+            const w = Math.abs(e.clientX - startX);
+            const h = Math.abs(e.clientY - startY);
+            drawOverlay({x, y, w, h});
+        });
+
+        document.addEventListener('mouseup', e => {
+            if (!isDragging) return;
+            isDragging = false;
+            
+            const x = Math.min(startX, e.clientX);
+            const y = Math.min(startY, e.clientY);
+            const w = Math.abs(e.clientX - startX);
+            const h = Math.abs(e.clientY - startY);
+            
+            if (w > 10 && h > 10) {
+                desktopApi.snip.complete({ x, y, width: w, height: h });
+            } else {
+                desktopApi.snip.cancel();
+            }
+        });
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                desktopApi.snip.cancel();
+            }
+        });
+    </script>
+</body>
+</html>

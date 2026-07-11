@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G.R.C TRANSLATOR</title>
+    <link rel="icon" href="assets/spider-intro.png" type="image/png">
+    <style>
+        :root {
+            color-scheme: dark;
+            --accent: #b49aff;
+            --accent-soft: rgba(180, 154, 255, 0.2);
+            --text: #ffffff;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: transparent;
+            font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        }
+
+        body {
+            display: grid;
+            place-items: center;
+            padding: 12px;
+        }
+
+        .toast-shell {
+            position: relative;
+            width: 100%;
+            min-height: 152px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            overflow: hidden;
+            padding: 20px 48px 22px 24px;
+            border: 1px solid rgba(196, 173, 239, 0.28);
+            border-radius: 0;
+            color: var(--text);
+            background: rgba(22, 13, 38, 0.94);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.58), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(22px);
+            -webkit-backdrop-filter: blur(22px);
+            cursor: grab;
+            -webkit-app-region: drag;
+            animation: toastIn 220ms cubic-bezier(.2, .8, .2, 1);
+        }
+
+        .toast-shell::before {
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 3px;
+            background: linear-gradient(to bottom, transparent, var(--accent), #6d3fe3, transparent);
+            box-shadow: 0 0 18px var(--accent);
+        }
+
+        .toast-shell::after {
+            content: "";
+            position: absolute;
+            width: 220px;
+            height: 110px;
+            top: -72px;
+            left: 60px;
+            border-radius: 50%;
+            pointer-events: none;
+            background: var(--accent-soft);
+            filter: blur(38px);
+        }
+
+        .toast-shell:active {
+            cursor: grabbing;
+        }
+
+        .toast-header {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 11px;
+            color: var(--accent);
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+        }
+
+        .brand-mark {
+            width: 25px;
+            height: 25px;
+            display: grid;
+            place-items: center;
+        }
+
+        .brand-mark img {
+            width: 19px;
+            height: 22px;
+            object-fit: contain;
+            filter: drop-shadow(0 0 5px rgba(180, 154, 255, 0.7));
+        }
+
+        .separator {
+            width: 3px;
+            height: 3px;
+            border-radius: 50%;
+            background: currentColor;
+            opacity: 0.5;
+        }
+
+        .content-row {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .spinner {
+            display: none;
+            width: 19px;
+            height: 19px;
+            flex: 0 0 auto;
+            border: 2px solid rgba(180, 154, 255, 0.2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 650ms linear infinite;
+        }
+
+        .toast-shell.loading .spinner {
+            display: block;
+        }
+
+        #content {
+            max-width: 100%;
+            color: inherit;
+            font-size: 18px;
+            font-weight: 560;
+            line-height: 1.45;
+            letter-spacing: -0.012em;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+        }
+
+        .toast-shell.loading #content {
+            color: rgba(255, 255, 255, 0.78);
+            font-size: 15px;
+            letter-spacing: 0.01em;
+        }
+
+        .close-button {
+            position: absolute;
+            z-index: 3;
+            top: 14px;
+            right: 14px;
+            width: 28px;
+            height: 28px;
+            display: grid;
+            place-items: center;
+            border: 1px solid transparent;
+            border-radius: 0;
+            color: rgba(255, 255, 255, 0.46);
+            background: transparent;
+            cursor: pointer;
+            -webkit-app-region: no-drag;
+            transition: 140ms ease;
+        }
+
+        .close-button:hover {
+            color: white;
+            border-color: rgba(255, 255, 255, 0.11);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .close-button svg {
+            width: 13px;
+            height: 13px;
+        }
+
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateY(10px) scale(0.975); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="toast-shell" id="toastBox">
+        <button class="close-button" id="closeButton" type="button" aria-label="Fechar tradução">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="m4 4 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+        </button>
+        <div class="toast-header">
+            <span class="brand-mark"><img src="assets/spider-intro.png" alt=""></span>
+            <span>G.R.C Translator</span>
+            <span class="separator"></span>
+            <span id="stateLabel">Tradução</span>
+        </div>
+        <div class="content-row">
+            <span class="spinner" aria-hidden="true"></span>
+            <div id="content">Carregando...</div>
+        </div>
+    </div>
+
+    <script>
+        const desktopApi = window.ocrDesktop;
+        const toastBox = document.getElementById('toastBox');
+        const content = document.getElementById('content');
+        const stateLabel = document.getElementById('stateLabel');
+
+        function hexToRgba(hex, alpha) {
+            if (typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) {
+                return `rgba(22, 13, 38, ${alpha})`;
+            }
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        desktopApi.toast.onSetText(data => {
+            const text = typeof data?.text === 'string' ? data.text : '';
+            const style = data?.style || {};
+            const loading = text.trim().toLowerCase().startsWith('traduzindo');
+
+            content.innerText = text;
+            stateLabel.textContent = loading ? 'Processando' : 'Tradução';
+            toastBox.classList.toggle('loading', loading);
+            toastBox.style.color = style.textColor || '#ffffff';
+            toastBox.style.background = hexToRgba(
+                style.bgColor || '#160d26',
+                style.opacity !== undefined ? style.opacity : 0.94
+            );
+        });
+
+        document.getElementById('closeButton').addEventListener('click', event => {
+            event.stopPropagation();
+            desktopApi.toast.close();
+        });
+    </script>
+</body>
+</html>

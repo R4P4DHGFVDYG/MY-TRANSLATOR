@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+import math
 import re
 from typing import Any
 
@@ -14,7 +15,16 @@ DATA_URL_RE = re.compile(
 )
 
 
-def image_from_data_url(data_url: str) -> Image.Image:
+class ImagePayloadTooLarge(ValueError):
+    """Raised when an image payload exceeds a configured safety limit."""
+
+
+def image_from_data_url(
+    data_url: str,
+    *,
+    max_image_bytes: int | None = None,
+    max_image_pixels: int | None = None,
+) -> Image.Image:
     if not isinstance(data_url, str):
         raise ValueError("imageDataUrl must be a data URL string")
 
@@ -22,18 +32,38 @@ def image_from_data_url(data_url: str) -> Image.Image:
     if not match:
         raise ValueError("imageDataUrl must be a base64 image data URL")
 
+    encoded = match.group("data")
+    if max_image_bytes and len(encoded) > _max_base64_length(max_image_bytes):
+        raise ImagePayloadTooLarge("imageDataUrl exceeds the allowed image size")
+
     try:
-        raw = base64.b64decode(match.group("data"), validate=True)
-        image = Image.open(BytesIO(raw))
-        image.load()
+        raw = base64.b64decode(encoded, validate=True)
     except Exception as exc:
         raise ValueError("imageDataUrl contains an invalid image") from exc
 
-    return image.convert("RGB")
+    if max_image_bytes and len(raw) > max_image_bytes:
+        raise ImagePayloadTooLarge("imageDataUrl exceeds the allowed image size")
+
+    try:
+        with Image.open(BytesIO(raw)) as image:
+            if max_image_pixels and image.width * image.height > max_image_pixels:
+                raise ImagePayloadTooLarge(
+                    "imageDataUrl exceeds the allowed pixel count"
+                )
+            image.load()
+            return image.convert("RGB")
+    except ImagePayloadTooLarge:
+        raise
+    except Exception as exc:
+        raise ValueError("imageDataUrl contains an invalid image") from exc
 
 
 def crop_visible_selection(
-    image: Image.Image, selection: dict[str, Any], viewport: dict[str, Any]
+    image: Image.Image,
+    selection: dict[str, Any],
+    viewport: dict[str, Any],
+    *,
+    max_crop_pixels: int | None = None,
 ) -> tuple[Image.Image, dict[str, float | int]]:
     viewport_width = _positive_float(viewport, "width")
     viewport_height = _positive_float(viewport, "height")
@@ -53,7 +83,14 @@ def crop_visible_selection(
     if right <= left or bottom <= top:
         raise ValueError("selection does not contain visible pixels")
 
-    crop = image.crop((left, top, right, bottom)).convert("RGB")
+    crop_width = right - left
+    crop_height = bottom - top
+    if max_crop_pixels and crop_width * crop_height > max_crop_pixels:
+        raise ImagePayloadTooLarge("selection exceeds the allowed pixel count")
+    if left == 0 and top == 0 and right == image.width and bottom == image.height:
+        crop = image if image.mode == "RGB" else image.convert("RGB")
+    else:
+        crop = image.crop((left, top, right, bottom)).convert("RGB")
     meta = {
         "scaleX": scale_x,
         "scaleY": scale_y,
@@ -68,21 +105,27 @@ def crop_visible_selection(
 
 
 def preprocess_for_ocr(image: Image.Image) -> Image.Image:
-    return preprocess_variants_for_ocr(image)[0][1]
+    return preprocess_variants_for_ocr(image, max_variants=1)[0][1]
 
 
-def preprocess_variants_for_ocr(image: Image.Image) -> list[tuple[str, Image.Image]]:
+def preprocess_variants_for_ocr(
+    image: Image.Image, *, max_variants: int = 0
+) -> list[tuple[str, Image.Image]]:
     gray = ImageOps.grayscale(image)
     normalized = ImageOps.autocontrast(gray)
     standard = _upscale_for_ocr(normalized.filter(ImageFilter.SHARPEN))
-    soft = _upscale_for_ocr(normalized)
-    binary = standard.point(lambda pixel: 255 if pixel > 170 else 0)
+    variants = [("standard", standard)]
+    if max_variants == 1:
+        return variants
 
-    return [
-        ("standard", standard),
-        ("soft", soft),
-        ("binary", binary),
-    ]
+    soft = _upscale_for_ocr(normalized)
+    variants.append(("soft", soft))
+    if max_variants == 2:
+        return variants
+
+    binary = standard.point(lambda pixel: 255 if pixel > 170 else 0)
+    variants.append(("binary", binary))
+    return variants
 
 
 def _upscale_for_ocr(image: Image.Image) -> Image.Image:
@@ -99,9 +142,16 @@ def _upscale_for_ocr(image: Image.Image) -> Image.Image:
 
 def _float_value(data: dict[str, Any], key: str) -> float:
     try:
-        return float(data[key])
+        raw_value = data[key]
+        if isinstance(raw_value, bool):
+            raise TypeError
+        value = float(raw_value)
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"{key} must be a number") from exc
+
+    if not math.isfinite(value):
+        raise ValueError(f"{key} must be a finite number")
+    return value
 
 
 def _positive_float(data: dict[str, Any], key: str) -> float:
@@ -114,3 +164,7 @@ def _positive_float(data: dict[str, Any], key: str) -> float:
 
 def _clamp(value: int, lower: int, upper: int) -> int:
     return max(lower, min(upper, value))
+
+
+def _max_base64_length(max_bytes: int) -> int:
+    return ((max_bytes + 2) // 3) * 4

@@ -1,6 +1,6 @@
-# I LOVE WEBCOMICS
+# G.R.C TRANSLATOR
 
-Tradutor de HQs/webcomics para Chrome e Edge.
+O G.R.C TRANSLATOR e um tradutor OCR para desktop, com a extensao de Chrome/Edge preservada como cliente alternativo.
 
 Voce seleciona um balao, legenda ou texto na pagina. A extensao le o texto da imagem e mostra a traducao em portugues.
 
@@ -11,6 +11,7 @@ Importante: a extensao precisa de um programinha local em Python rodando no seu 
 - Windows 10 ou 11.
 - Python 3.10 ou mais novo.
 - Chrome ou Edge.
+- Node.js LTS, apenas se for usar o aplicativo desktop Electron.
 - Internet na primeira instalacao.
 
 Baixe Python aqui:
@@ -63,6 +64,17 @@ python -m venv .venv
 
 Essa parte demora. E normal.
 
+### Aplicativo Desktop (Recomendado)
+
+Para usar o atalho `Ctrl+Shift+Q` fora do navegador, instale tambem as dependencias do Electron:
+
+```powershell
+cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\electron_client"
+npm ci
+```
+
+O aplicativo desktop incluido vem configurado para OCR em ingles e usa o perfil PaddleOCR mobile de baixa latencia. Para reconhecer outros idiomas, configure os modelos do bridge antes de alterar o cliente.
+
 ## Iniciar
 
 Sempre que for usar, deixe este PowerShell aberto:
@@ -79,6 +91,19 @@ http://127.0.0.1:8765
 ```
 
 Nao feche essa janela enquanto estiver usando a extensao.
+
+### Aplicativo Desktop
+
+Depois de iniciar o bridge, em outro PowerShell rode:
+
+```powershell
+cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\electron_client"
+npm start
+```
+
+Use `Ctrl+Shift+Q` ou um dos botoes laterais configurados para selecionar uma area da tela.
+
+No pacote local deste projeto, `iniciar_tradutor_jogos.bat` inicia o bridge, espera o modelo OCR terminar o aquecimento e somente entao abre o Electron. Isso evita que a primeira captura pague o custo de carregar os modelos.
 
 ## Instalar A Extensao No Navegador
 
@@ -98,7 +123,7 @@ Documentos\I-LOVE-WEBCOMICS\extension
 Bridge URL: http://127.0.0.1:8765
 Origem: en
 Destino: pt-BR
-OCR: PaddleOCR e EasyOCR marcados
+OCR: PaddleOCR marcado (EasyOCR e opcional e mais lento)
 ```
 
 ## Usar
@@ -126,6 +151,8 @@ cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS"
 git pull
 cd bridge
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-ocr.txt -r requirements-paddleocr.txt
+cd ..\electron_client
+npm ci
 ```
 
 Se voce baixou ZIP, baixe o ZIP novo e substitua a pasta antiga.
@@ -153,7 +180,20 @@ Depois feche e abra o PowerShell de novo.
 
 ### A primeira traducao demora
 
-Normal. O OCR carrega modelos pesados na primeira vez.
+Inicie pelo `iniciar_tradutor_jogos.bat` e espere a mensagem de que tudo esta pronto. Se o bridge for iniciado manualmente, acompanhe `http://127.0.0.1:8765/ready`; o endpoint responde HTTP 200 depois do aquecimento.
+
+## Desempenho
+
+O caminho desktop rapido aplica estas otimizacoes:
+
+- abre o seletor imediatamente e captura somente depois que a regiao foi escolhida;
+- recorta a regiao no processo principal do Electron e envia apenas esse PNG ao bridge;
+- usa PaddleOCR mobile, uma variante de pre-processamento e aquecimento no inicio;
+- reutiliza resultados por imagem e texto com caches LRU/TTL;
+- cancela trabalho obsoleto quando uma captura mais nova chega;
+- reutiliza a janela de traducao e conexoes HTTP.
+
+O Electron e o bridge imprimem linhas `[performance]` com os tempos de captura, recorte, codificacao, OCR, traducao e total. O JSON retornado tambem inclui `performance.timings` e os indicadores de cache.
 
 ### A traducao ficou estranha
 

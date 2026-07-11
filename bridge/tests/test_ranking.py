@@ -69,3 +69,14 @@ def test_engine_result_includes_raw_text_when_normalized():
     result = EngineResult("easyocr:standard", "YOU", 0.8, 0.8, raw_text="4ou")
 
     assert result.to_dict()["rawText"] == "4ou"
+
+
+def test_ranking_and_serialization_ignore_non_finite_confidence_values():
+    invalid = EngineResult("easyocr", "HELLO WORLD", float("nan"), float("inf"))
+    valid = EngineResult("tesseract", "HELLO", 0.4, 0.4)
+
+    best = rank_ocr_results([invalid, valid])
+
+    assert best is valid
+    assert invalid.to_dict()["score"] == 0.0
+    assert "rawConfidence" not in invalid.to_dict()

@@ -144,13 +144,18 @@ class PaddleOcrRunner:
 
 def main() -> int:
     args = parse_args()
-    images = collect_images(args.images, args.limit, args.all)
+    try:
+        images = collect_images(args.images, args.limit, args.all)
+        variants = parse_variants(args.variants)
+        runners = build_runners(args)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
     if not images:
         print(f"No images found in {args.images}", file=sys.stderr)
         return 2
 
-    variants = parse_variants(args.variants)
-    runners = build_runners(args)
     records = compare_images(images, runners, variants)
     summary = summarize(records)
 
@@ -224,8 +229,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def collect_images(path: Path, limit: int, include_all: bool) -> list[Path]:
+    if not path.exists():
+        raise ValueError(f"Image path does not exist: {path}")
     if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
         return [path]
+    if not path.is_dir():
+        raise ValueError(f"Image path is neither a file nor a directory: {path}")
     images = [
         item
         for item in sorted(path.iterdir())
@@ -241,12 +250,16 @@ def parse_variants(value: str) -> list[str]:
     allowed = {"standard", "soft", "binary"}
     unknown = sorted(set(variants) - allowed)
     if unknown:
-        raise SystemExit(f"Unknown variants: {', '.join(unknown)}")
+        raise ValueError(f"Unknown variants: {', '.join(unknown)}")
+    if not variants:
+        raise ValueError("At least one preprocess variant must be selected")
     return variants
 
 
 def build_runners(args: argparse.Namespace) -> list[OcrRunner]:
     requested = [item.strip().lower() for item in args.engines.split(",") if item.strip()]
+    if not requested:
+        raise ValueError("At least one OCR engine must be selected")
     runners: list[OcrRunner] = []
     for engine in requested:
         if engine == "easyocr":
@@ -268,7 +281,7 @@ def build_runners(args: argparse.Namespace) -> list[OcrRunner]:
                 )
             )
         else:
-            raise SystemExit(f"Unknown engine: {engine}")
+            raise ValueError(f"Unknown engine: {engine}")
     return runners
 
 

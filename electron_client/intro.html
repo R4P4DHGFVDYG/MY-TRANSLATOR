@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G.R.C TRANSLATOR</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --intro-duration: 3200ms;
+            --purple: #b49aff;
+            --purple-strong: #7d3cff;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: transparent;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        body {
+            display: grid;
+            place-items: center;
+        }
+
+        .intro-scene {
+            position: relative;
+            width: clamp(280px, 34vw, 460px);
+            aspect-ratio: 460 / 542;
+            isolation: isolate;
+        }
+
+        .aura {
+            position: absolute;
+            z-index: -2;
+            inset: 15% 4%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(137, 61, 255, 0.28), rgba(95, 24, 207, 0.1) 42%, transparent 70%);
+            filter: blur(34px);
+            animation: auraPulse var(--intro-duration) ease-out forwards;
+        }
+
+        .spider-half {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            transform-origin: center;
+            will-change: transform, opacity, filter;
+        }
+
+        .spider-half img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 0 12px rgba(180, 154, 255, 0.75))
+                    drop-shadow(0 0 32px rgba(111, 34, 255, 0.46));
+        }
+
+        .spider-half.left {
+            clip-path: inset(0 50% 0 0);
+            animation: splitLeft var(--intro-duration) cubic-bezier(.2, .65, .2, 1) forwards;
+        }
+
+        .spider-half.right {
+            clip-path: inset(0 0 0 50%);
+            animation: splitRight var(--intro-duration) cubic-bezier(.2, .65, .2, 1) forwards;
+        }
+
+        .fracture {
+            position: absolute;
+            z-index: 4;
+            top: 9%;
+            bottom: 8%;
+            left: calc(50% - 1px);
+            width: 2px;
+            opacity: 0;
+            background: linear-gradient(to bottom, transparent, #ffffff 24%, var(--purple) 50%, #ffffff 76%, transparent);
+            box-shadow: 0 0 9px #ffffff, 0 0 28px var(--purple-strong), 0 0 55px rgba(125, 60, 255, 0.85);
+            animation: fracture var(--intro-duration) ease-out forwards;
+        }
+
+        .screen-flash {
+            position: fixed;
+            z-index: 1;
+            inset: -30vh -30vw;
+            opacity: 0;
+            background: radial-gradient(circle, rgba(224, 205, 255, 0.34), rgba(131, 57, 255, 0.12) 24%, transparent 58%);
+            animation: flash var(--intro-duration) ease-out forwards;
+        }
+
+        .particles {
+            position: absolute;
+            z-index: 5;
+            inset: 0;
+        }
+
+        .particle {
+            --x: 0px;
+            --y: 0px;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 4px;
+            height: 4px;
+            opacity: 0;
+            background: #efe6ff;
+            box-shadow: 0 0 9px var(--purple), 0 0 18px var(--purple-strong);
+            animation: particle var(--intro-duration) ease-out forwards;
+        }
+
+        .particle:nth-child(1) { --x: -150px; --y: -120px; }
+        .particle:nth-child(2) { --x: 145px; --y: -104px; animation-delay: 25ms; }
+        .particle:nth-child(3) { --x: -190px; --y: -12px; animation-delay: 55ms; }
+        .particle:nth-child(4) { --x: 184px; --y: 18px; animation-delay: 80ms; }
+        .particle:nth-child(5) { --x: -132px; --y: 134px; animation-delay: 40ms; }
+        .particle:nth-child(6) { --x: 127px; --y: 148px; animation-delay: 70ms; }
+        .particle:nth-child(7) { --x: -48px; --y: -178px; animation-delay: 95ms; }
+        .particle:nth-child(8) { --x: 54px; --y: 182px; animation-delay: 110ms; }
+
+        @keyframes splitLeft {
+            0%   { opacity: 0; transform: translateX(0) scale(.86); filter: blur(7px) brightness(1.3); }
+            18%  { opacity: 1; transform: translateX(0) scale(1.02); filter: blur(0) brightness(1.1); }
+            42%  { opacity: 1; transform: translateX(0) scale(1); filter: blur(0) brightness(1); }
+            52%  { opacity: 1; transform: translateX(-4px) scale(1.005); filter: brightness(1.25); }
+            70%  { opacity: .92; transform: translateX(-110px) rotate(-2deg) scale(1.02); filter: brightness(1.12); }
+            100% { opacity: 0; transform: translateX(-54vw) rotate(-8deg) scale(1.06); filter: blur(2px) brightness(.9); }
+        }
+
+        @keyframes splitRight {
+            0%   { opacity: 0; transform: translateX(0) scale(.86); filter: blur(7px) brightness(1.3); }
+            18%  { opacity: 1; transform: translateX(0) scale(1.02); filter: blur(0) brightness(1.1); }
+            42%  { opacity: 1; transform: translateX(0) scale(1); filter: blur(0) brightness(1); }
+            52%  { opacity: 1; transform: translateX(4px) scale(1.005); filter: brightness(1.25); }
+            70%  { opacity: .92; transform: translateX(110px) rotate(2deg) scale(1.02); filter: brightness(1.12); }
+            100% { opacity: 0; transform: translateX(54vw) rotate(8deg) scale(1.06); filter: blur(2px) brightness(.9); }
+        }
+
+        @keyframes fracture {
+            0%, 38% { opacity: 0; transform: scaleY(.1); }
+            45%     { opacity: 1; transform: scaleY(1); }
+            56%     { opacity: .88; transform: scaleY(1.08); }
+            72%     { opacity: 0; transform: scaleY(.35); }
+            100%    { opacity: 0; }
+        }
+
+        @keyframes flash {
+            0%, 43% { opacity: 0; transform: scale(.72); }
+            50%     { opacity: 1; transform: scale(1); }
+            66%     { opacity: 0; transform: scale(1.25); }
+            100%    { opacity: 0; }
+        }
+
+        @keyframes auraPulse {
+            0%      { opacity: 0; transform: scale(.5); }
+            18%     { opacity: .9; transform: scale(1); }
+            48%     { opacity: 1; transform: scale(1.08); }
+            75%,100% { opacity: 0; transform: scale(1.65); }
+        }
+
+        @keyframes particle {
+            0%, 46% { opacity: 0; transform: translate(0, 0) scale(.2); }
+            51%     { opacity: 1; transform: translate(0, 0) scale(1.2); }
+            83%     { opacity: .65; }
+            100%    { opacity: 0; transform: translate(var(--x), var(--y)) scale(.4); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            :root { --intro-duration: 550ms; }
+            .screen-flash,
+            .particles,
+            .fracture { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="screen-flash" aria-hidden="true"></div>
+    <div class="intro-scene" aria-hidden="true">
+        <div class="aura"></div>
+        <div class="spider-half left">
+            <img src="assets/spider-intro.png" alt="" draggable="false">
+        </div>
+        <div class="spider-half right">
+            <img src="assets/spider-intro.png" alt="" draggable="false">
+        </div>
+        <div class="fracture"></div>
+        <div class="particles">
+            <i class="particle"></i><i class="particle"></i><i class="particle"></i><i class="particle"></i>
+            <i class="particle"></i><i class="particle"></i><i class="particle"></i><i class="particle"></i>
+        </div>
+    </div>
+
+    <script>
+        const introApi = window.ocrDesktop?.intro;
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const completeDelay = reducedMotion ? 560 : 3300;
+        let finished = false;
+
+        function completeIntro() {
+            if (finished) return;
+            finished = true;
+            introApi?.complete();
+        }
+
+        for (const image of document.querySelectorAll('.spider-half img')) {
+            image.addEventListener('error', completeIntro, { once: true });
+        }
+
+        setTimeout(completeIntro, completeDelay);
+    </script>
+</body>
+</html>
