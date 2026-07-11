@@ -71,7 +71,7 @@ def test_translate_selection_contract():
             "viewport": {"width": 20, "height": 20},
             "source": "en",
             "target": "pt-BR",
-            "engines": ["easyocr", "tesseract"],
+            "engines": ["paddleocr", "tesseract"],
         },
     )
 
@@ -185,12 +185,12 @@ def test_requested_engines_are_deduplicated_and_validated():
             "imageDataUrl": _png_data_url(),
             "selection": {"x": 0, "y": 0, "width": 20, "height": 20},
             "viewport": {"width": 20, "height": 20},
-            "engines": ["easyocr", " easyocr "],
+            "engines": ["paddleocr", " paddleocr "],
         },
     )
 
     assert response.status_code == 200
-    assert ocr_service.requests == [{"engines": ["easyocr"]}]
+    assert ocr_service.requests == [{"engines": ["paddleocr"]}]
 
     rejected = client.post(
         "/v1/translate-selection",
@@ -204,6 +204,19 @@ def test_requested_engines_are_deduplicated_and_validated():
 
     assert rejected.status_code == 400
     assert "unsupported OCR engine" in rejected.get_json()["error"]
+
+    easyocr_rejected = client.post(
+        "/v1/translate-selection",
+        json={
+            "imageDataUrl": _png_data_url(),
+            "selection": {"x": 0, "y": 0, "width": 20, "height": 20},
+            "viewport": {"width": 20, "height": 20},
+            "engines": ["easyocr"],
+        },
+    )
+
+    assert easyocr_rejected.status_code == 400
+    assert "unsupported OCR engine" in easyocr_rejected.get_json()["error"]
 
 
 def test_older_desktop_request_is_discarded_before_image_decode():
@@ -345,7 +358,7 @@ def test_debug_capture_writes_crop_and_metadata(tmp_path):
             "viewport": {"width": 20, "height": 20},
             "source": "en",
             "target": "pt-BR",
-            "engines": ["easyocr"],
+            "engines": ["paddleocr"],
             "debug": True,
         },
     )

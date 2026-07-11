@@ -39,7 +39,12 @@ def test_paddleocr_engine_can_be_requested(monkeypatch):
 
 
 def test_ocr_max_variants_limits_easyocr_work(monkeypatch):
-    service = OcrService(BridgeConfig(ocr_max_variants=1))
+    service = OcrService(
+        BridgeConfig(
+            allowed_ocr_engines=("paddleocr", "easyocr", "tesseract"),
+            ocr_max_variants=1,
+        )
+    )
 
     def fake_easyocr(image):
         return EngineResult("easyocr", "HELLO WORLD", 0.9, 0.9)
@@ -78,7 +83,12 @@ def test_ocr_cache_skips_unchanged_pixels(monkeypatch):
 
 
 def test_ocr_cancellation_discards_work_before_another_variant(monkeypatch):
-    service = OcrService(BridgeConfig(ocr_max_variants=3))
+    service = OcrService(
+        BridgeConfig(
+            allowed_ocr_engines=("paddleocr", "easyocr", "tesseract"),
+            ocr_max_variants=3,
+        )
+    )
     cancelled = False
     calls = 0
 
