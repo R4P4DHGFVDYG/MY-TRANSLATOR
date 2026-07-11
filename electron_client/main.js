@@ -41,7 +41,6 @@ let pendingToastPayload = null;
 let isPositioningToast = false;
 let sideMouseHookProcess = null;
 let isStartingSnip = false;
-let snipMode = 'single';
 let activeTranslation = null;
 let nextTranslationId = 0;
 let fixedCaptureRegion = null;
@@ -133,7 +132,7 @@ function closeToastWindow() {
 function getFixedAreaState() {
     return {
         active: Boolean(fixedCaptureRegion),
-        selecting: snipMode === 'fixed' && (isStartingSnip || isWindowAlive(snipWindow))
+        selecting: isStartingSnip || isWindowAlive(snipWindow)
     };
 }
 
@@ -542,14 +541,13 @@ function getSourceForDisplay(sources, display) {
     return sources[displayIndex] || sources[0];
 }
 
-async function startSnip(mode = 'single') {
+async function startSnip() {
     if (isStartingSnip || isWindowAlive(snipWindow)) {
         return;
     }
 
     stopFixedCapture();
     isStartingSnip = true;
-    snipMode = mode === 'fixed' ? 'fixed' : 'single';
     cancelActiveTranslation();
     nextTranslationId += 1;
     closeToastWindow();
@@ -581,14 +579,11 @@ async function startSnip(mode = 'single') {
             if (snipWindow === currentSnip) {
                 snipWindow = null;
                 snipDisplay = null;
-                snipMode = 'single';
                 publishFixedAreaState();
             }
         });
 
-        await currentSnip.loadFile(path.join(__dirname, 'snip.html'), {
-            query: { mode: snipMode }
-        });
+        await currentSnip.loadFile(path.join(__dirname, 'snip.html'));
         if (!isWindowAlive(currentSnip) || snipWindow !== currentSnip) {
             return;
         }
@@ -602,7 +597,6 @@ async function startSnip(mode = 'single') {
         }
         snipWindow = null;
         snipDisplay = null;
-        snipMode = 'single';
         publishFixedAreaState();
         showToast('Não foi possível abrir o seletor de tela.', captureDisplay.bounds.x, captureDisplay.bounds.y, settings, captureDisplay);
     } finally {
@@ -1096,14 +1090,6 @@ ipcMain.on('minimize-settings', event => {
     }
 });
 
-ipcMain.on('start-capture', event => {
-    if (!isEventFromWindow(event, settingsWindow)) {
-        return;
-    }
-    settingsWindow.minimize();
-    void startSnip();
-});
-
 ipcMain.on('toggle-fixed-area', event => {
     if (!isEventFromWindow(event, settingsWindow)) {
         return;
@@ -1115,7 +1101,6 @@ ipcMain.on('toggle-fixed-area', event => {
             const currentSnip = snipWindow;
             snipWindow = null;
             snipDisplay = null;
-            snipMode = 'single';
             closeWindow(currentSnip);
         }
         stopFixedCapture();
@@ -1124,7 +1109,7 @@ ipcMain.on('toggle-fixed-area', event => {
     }
 
     settingsWindow.minimize();
-    void startSnip('fixed');
+    void startSnip();
 });
 
 ipcMain.handle('fixed-area-state', event => {
@@ -1149,10 +1134,8 @@ ipcMain.on('snip-complete', (event, payload) => {
 
     const selection = validateSnipPayload(payload);
     const display = snipDisplay || screen.getPrimaryDisplay();
-    const completedMode = snipMode;
     snipWindow = null;
     snipDisplay = null;
-    snipMode = 'single';
     if (isWindowAlive(currentSnip)) {
         currentSnip.hide();
         currentSnip.destroy();
@@ -1163,27 +1146,7 @@ ipcMain.on('snip-complete', (event, payload) => {
         return;
     }
 
-    if (completedMode === 'fixed') {
-        startFixedCapture(selection, display);
-        return;
-    }
-
-    publishFixedAreaState();
-
-    const anchorPoint = {
-        x: display.bounds.x + selection.x,
-        y: display.bounds.y + selection.y
-    };
-    const translationId = ++nextTranslationId;
-    void captureSelection(selection, display)
-        .then(captured => translateSelection(captured, anchorPoint, display, translationId))
-        .catch(error => {
-            if (translationId !== nextTranslationId) {
-                return;
-            }
-            console.error('Failed to capture selected region:', error);
-            showToast('Não foi possível capturar a região selecionada.', anchorPoint.x, anchorPoint.y, settings, display);
-        });
+    startFixedCapture(selection, display);
 });
 
 ipcMain.on('snip-cancel', event => {
@@ -1194,7 +1157,6 @@ ipcMain.on('snip-cancel', event => {
     const currentSnip = snipWindow;
     snipWindow = null;
     snipDisplay = null;
-    snipMode = 'single';
     closeWindow(currentSnip);
     publishFixedAreaState();
 });

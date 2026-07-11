@@ -102,9 +102,7 @@ cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\electron_client"
 npm start
 ```
 
-Use `Ctrl+Shift+Q` ou um dos botoes laterais configurados para selecionar uma area da tela.
-
-Para jogos com legendas sempre no mesmo lugar, clique em `Criar area fixa` e selecione a regiao uma unica vez. O aplicativo verifica essa area continuamente, ignora imagens e textos repetidos e traduz apenas quando o conteudo muda. Clique em `Parar area fixa` para encerrar o monitoramento.
+Use `Ctrl+Shift+Q`, um dos botoes laterais configurados ou `Definir area automatica` para selecionar a regiao das legendas. O aplicativo verifica essa area continuamente, ignora imagens e textos repetidos e traduz apenas quando o conteudo muda. Use o mesmo atalho para redefinir a regiao ou clique em `Parar traducao automatica` para encerrar o monitoramento.
 
 As janelas de selecao e traducao usam uma sobreposicao de tela cheia para permanecer visiveis em jogos no modo janela sem bordas (borderless fullscreen). Tela cheia exclusiva e alguns sistemas anti-cheat podem bloquear sobreposicoes ou a captura do Windows; nesses casos, selecione janela sem bordas nas configuracoes do jogo.
 

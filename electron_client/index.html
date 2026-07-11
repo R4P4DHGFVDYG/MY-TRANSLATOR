@@ -285,15 +285,7 @@
             gap: 8px;
         }
 
-        .capture-button.secondary {
-            height: 42px;
-            border: 1px solid rgba(180, 154, 255, 0.38);
-            color: var(--text);
-            background: rgba(180, 154, 255, 0.1);
-            box-shadow: none;
-        }
-
-        .capture-button.secondary.active {
+        .capture-button.active {
             border-color: rgba(74, 226, 168, 0.58);
             color: #d8fff0;
             background: rgba(74, 226, 168, 0.13);
@@ -577,23 +569,16 @@
                         <span id="statusLabel">Verificando o bridge</span>
                     </div>
                     <h1>Tradutor desenvolvido para desktop, com foco em jogos.</h1>
-                    <p>Traduza uma vez ou defina uma área fixa para acompanhar as próximas legendas automaticamente.
+                    <p>Defina uma área da tela e traduza automaticamente todas as legendas que aparecerem nela.
 </p>
                 </div>
                 <div class="hero-actions">
-                    <button class="capture-button" id="captureButton" type="button">
-                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                            <path d="M7 3H4a1 1 0 0 0-1 1v3m10-4h3a1 1 0 0 1 1 1v3M7 17H4a1 1 0 0 1-1-1v-3m10 4h3a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                            <path d="M7 10h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                        </svg>
-                        Traduzir uma vez
-                    </button>
-                    <button class="capture-button secondary" id="fixedAreaButton" type="button" aria-pressed="false">
+                    <button class="capture-button" id="fixedAreaButton" type="button" aria-pressed="false">
                         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
                             <path d="M7 3H4a1 1 0 0 0-1 1v3m9-4h3a1 1 0 0 1 1 1v3M7 17H4a1 1 0 0 1-1-1v-3m9 4h3a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
                             <circle cx="10" cy="10" r="2.2" stroke="currentColor" stroke-width="1.5"/>
                         </svg>
-                        <span id="fixedAreaButtonLabel">Criar área fixa</span>
+                        <span id="fixedAreaButtonLabel">Definir área automática</span>
                     </button>
                 </div>
             </section>
@@ -775,8 +760,8 @@
             label.textContent = selecting
                 ? 'Selecionando área...'
                 : active
-                    ? 'Parar área fixa'
-                    : 'Criar área fixa';
+                    ? 'Parar tradução automática'
+                    : 'Definir área automática';
         }
 
         function updateVisualValues() {
@@ -831,7 +816,6 @@
 
         document.getElementById('minimizeButton').addEventListener('click', () => desktopApi.settings.minimize());
         document.getElementById('closeButton').addEventListener('click', () => desktopApi.settings.close());
-        document.getElementById('captureButton').addEventListener('click', () => desktopApi.settings.capture());
         document.getElementById('fixedAreaButton').addEventListener('click', () => desktopApi.settings.toggleFixedArea());
 
         restoreOcrEngine();
