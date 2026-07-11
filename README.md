@@ -1,219 +1,211 @@
 # G.R.C TRANSLATOR
 
-O G.R.C TRANSLATOR e um tradutor OCR para desktop, com a extensao de Chrome/Edge preservada como cliente alternativo.
+Aplicativo desktop para traduzir legendas e textos exibidos na tela usando OCR. O usuário define uma área uma única vez, e o aplicativo monitora essa região, reconhece apenas conteúdos novos e exibe a tradução sobre o jogo ou programa.
 
-Voce seleciona um balao, legenda ou texto na pagina. A extensao le o texto da imagem e mostra a traducao em portugues.
+O projeto também preserva uma extensão para Chrome/Edge e um cliente desktop Python como alternativas, mas o cliente principal é o aplicativo Electron.
 
-Importante: a extensao precisa de um programinha local em Python rodando no seu PC. Sem ele, ela nao consegue fazer OCR.
+## Funcionalidades
 
-## O Que Voce Precisa
+- área automática de tradução: selecione a região das legendas uma vez;
+- OCR local com Tesseract, PaddleOCR ou EasyOCR;
+- escolha do mecanismo OCR diretamente na interface;
+- atalhos globais personalizados de teclado ou mouse;
+- legenda sobreposta, reposicionável e com aparência configurável;
+- interface desktop em tons de roxo e animação de abertura;
+- cache de imagens, textos reconhecidos e traduções;
+- cancelamento de requisições antigas e descarte de resultados atrasados;
+- logs de desempenho para captura, OCR, tradução e tempo total;
+- suporte a múltiplos monitores e jogos em janela sem bordas.
 
-- Windows 10 ou 11.
-- Python 3.10 ou mais novo.
-- Chrome ou Edge.
-- Node.js LTS, apenas se for usar o aplicativo desktop Electron.
-- Internet na primeira instalacao.
-
-Baixe Python aqui:
-
-```text
-https://www.python.org/downloads/
-```
-
-Na instalacao do Python, marque:
+## Como funciona
 
 ```text
-Add Python to PATH
+Área da tela
+    -> captura e recorte no Electron
+    -> comparação com a imagem anterior
+    -> OCR local no bridge Python
+    -> limpeza do texto
+    -> tradução via DeepL ou Google Translate
+    -> legenda sobreposta no Electron
 ```
 
-## Baixar O Projeto
+O OCR é executado localmente. A tradução usa internet: o bridge tenta DeepL quando uma chave está configurada e usa Google Translate como fallback. O endpoint utilizado do Google não é uma API oficial garantida.
 
-Escolha um dos jeitos.
+## Requisitos
 
-### Jeito Facil
+- Windows 10 ou Windows 11;
+- Python 3.10 ou superior;
+- Node.js LTS e npm;
+- Tesseract OCR para o modo padrão;
+- conexão com a internet para instalar dependências, baixar modelos opcionais e traduzir.
 
-1. Clique no botao verde `Code` aqui no GitHub.
-2. Clique em `Download ZIP`.
-3. Extraia o ZIP em `Documentos`.
-4. Renomeie a pasta extraida para:
+## Instalação rápida
 
-```text
-I-LOVE-WEBCOMICS
-```
-
-### Jeito Com Git
-
-No PowerShell:
+Abra o PowerShell e clone o repositório:
 
 ```powershell
 cd "$env:USERPROFILE\Documents"
-git clone https://github.com/R4P4DHGFVDYG/I-LOVE-WEBCOMICS-.git I-LOVE-WEBCOMICS
+git clone https://github.com/R4P4DHGFVDYG/G-R-C-TRANSLATOR-.git
+cd G-R-C-TRANSLATOR-
 ```
 
-## Instalar
-
-No PowerShell:
+### 1. Bridge Python e Tesseract
 
 ```powershell
-cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\bridge"
-
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-tesseract.txt
+python -m venv .\bridge\.venv
+.\bridge\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\bridge\.venv\Scripts\python.exe -m pip install -r .\bridge\requirements.txt -r .\bridge\requirements-tesseract.txt
 winget install --id UB-Mannheim.TesseractOCR --exact
 ```
 
-Essa parte demora. E normal.
+O bridge procura o Tesseract no `PATH` e também em `C:\Program Files\Tesseract-OCR\tesseract.exe`.
 
-### Aplicativo Desktop (Recomendado)
-
-Para usar um atalho global fora do navegador, instale tambem as dependencias do Electron:
+### 2. Aplicativo Electron
 
 ```powershell
-cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\electron_client"
+cd .\electron_client
 npm ci
+cd ..
 ```
 
-O aplicativo desktop incluido vem configurado para OCR em ingles. Nas configuracoes, e possivel alternar entre Tesseract, PaddleOCR e EasyOCR; a escolha fica salva para a proxima inicializacao. O bridge localiza automaticamente a instalacao padrao do Tesseract em `C:\Program Files\Tesseract-OCR`.
+## Executar
 
-## Iniciar
-
-Sempre que for usar, deixe este PowerShell aberto:
+Abra um PowerShell na raiz do projeto e inicie o bridge:
 
 ```powershell
-cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\bridge"
+cd .\bridge
 .\.venv\Scripts\python.exe -m hq_ocr_bridge
 ```
 
-Se estiver tudo certo, aparece um servidor em:
-
-```text
-http://127.0.0.1:8765
-```
-
-Nao feche essa janela enquanto estiver usando a extensao.
-
-### Aplicativo Desktop
-
-Depois de iniciar o bridge, em outro PowerShell rode:
+Mantenha essa janela aberta. Em outro PowerShell, inicie o Electron:
 
 ```powershell
-cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\electron_client"
+cd .\electron_client
 npm start
 ```
 
-Use o atalho configurado ou `Definir area automatica` para selecionar a regiao das legendas. O aplicativo verifica essa area continuamente, ignora imagens e textos repetidos e traduz apenas quando o conteudo muda. Use o mesmo atalho para redefinir a regiao ou clique em `Parar traducao automatica` para encerrar o monitoramento.
+O bridge fica disponível apenas no computador local em `http://127.0.0.1:8765`. O endpoint `http://127.0.0.1:8765/ready` indica quando o OCR terminou de aquecer.
 
-Em `Atalho de captura`, clique em `Alterar` e pressione a combinacao desejada. O aplicativo aceita combinacoes de teclado, teclas F1 a F24 sem modificadores, botao do meio e os dois botoes laterais do mouse. Os botoes esquerdo e direito nao podem ser usados para evitar bloquear os cliques normais do Windows.
+## Uso
 
-As janelas de selecao e traducao usam uma sobreposicao de tela cheia para permanecer visiveis em jogos no modo janela sem bordas (borderless fullscreen). Tela cheia exclusiva e alguns sistemas anti-cheat podem bloquear sobreposicoes ou a captura do Windows; nesses casos, selecione janela sem bordas nas configuracoes do jogo.
+1. Escolha o mecanismo OCR na interface.
+2. Clique em **Definir área automática**.
+3. Arraste sobre a região onde as legendas aparecem.
+4. Volte ao jogo ou programa.
+5. O aplicativo traduz automaticamente quando o conteúdo da região muda.
+6. Use **Parar tradução automática** para encerrar o monitoramento.
 
-No pacote local deste projeto, `iniciar_tradutor_jogos.bat` inicia o bridge, verifica o OCR e somente entao abre o Electron.
+O atalho padrão é `Ctrl + Shift + Q`. Em **Atalho de captura**, clique em **Alterar** e pressione:
 
-## Instalar A Extensao No Navegador
+- uma combinação de teclado;
+- uma tecla entre `F1` e `F24`;
+- o botão do meio do mouse;
+- um dos dois botões laterais do mouse.
 
-1. Abra `chrome://extensions` no Chrome ou `edge://extensions` no Edge.
-2. Ative `Modo do desenvolvedor`.
-3. Clique em `Carregar sem compactacao`.
-4. Selecione esta pasta:
+Cliques esquerdo e direito não podem ser usados como atalho, pois isso bloquearia a operação normal do Windows. Botões adicionais de mouses gamer normalmente precisam ser mapeados para uma tecla no software do fabricante.
 
-```text
-Documentos\I-LOVE-WEBCOMICS\extension
-```
+## Mecanismos OCR opcionais
 
-5. Abra as opcoes da extensao.
-6. Deixe assim:
-
-```text
-Bridge URL: http://127.0.0.1:8765
-Origem: en
-Destino: pt-BR
-OCR: PaddleOCR marcado (EasyOCR e opcional e mais lento)
-```
-
-## Usar
-
-1. Abra uma HQ ou webcomic no navegador.
-2. Clique no botao da extensao ou use `Alt+Q`.
-3. Arraste somente em cima do texto.
-4. Espere alguns segundos.
-5. A traducao aparece perto da selecao.
-
-Dica: selecione so o balao ou legenda. Se selecionar a pagina inteira, fica lento e erra mais.
-
-Para trocar o atalho, abra:
-
-```text
-chrome://extensions/shortcuts
-```
-
-## Atualizar
-
-Se voce baixou com Git:
+Tesseract é o padrão e inicia mais rápido. Para instalar EasyOCR:
 
 ```powershell
-cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS"
-git pull
-cd bridge
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-tesseract.txt
-cd ..\electron_client
-npm ci
+.\bridge\.venv\Scripts\python.exe -m pip install -r .\bridge\requirements-ocr.txt
 ```
 
-Se voce baixou ZIP, baixe o ZIP novo e substitua a pasta antiga.
-
-## Problemas Comuns
-
-### A extensao diz que nao conseguiu conectar
-
-O programa local provavelmente nao esta rodando. Abra o PowerShell e rode:
+Para instalar PaddleOCR:
 
 ```powershell
-cd "$env:USERPROFILE\Documents\I-LOVE-WEBCOMICS\bridge"
+.\bridge\.venv\Scripts\python.exe -m pip install -r .\bridge\requirements-paddleocr.txt
+```
+
+O primeiro uso de PaddleOCR ou EasyOCR pode demorar enquanto os modelos são carregados ou baixados.
+
+## Provedores de tradução
+
+Sem configuração adicional, o Google Translate é usado como fallback. Para usar a API gratuita do DeepL primeiro:
+
+```powershell
+cd .\bridge
+$env:HQ_OCR_DEEPL_AUTH_KEY = "SUA_CHAVE_DEEPL"
 .\.venv\Scripts\python.exe -m hq_ocr_bridge
 ```
 
-### `python` nao e reconhecido
+Nunca salve a chave diretamente no código ou faça commit de arquivos `.env`.
 
-Reinstale o Python e marque:
+## Jogos em tela cheia
 
-```text
-Add Python to PATH
-```
+O seletor e a legenda usam uma janela de sobreposição no nível mais alto. O modo recomendado é **janela sem bordas** ou **borderless fullscreen**.
 
-Depois feche e abra o PowerShell de novo.
+Tela cheia exclusiva e alguns sistemas anti-cheat podem bloquear a captura ou qualquer sobreposição externa. Nesses casos, altere o modo de exibição dentro do jogo. O projeto não injeta código no processo do jogo.
 
-### A primeira traducao demora
+## Extensão para navegador
 
-Inicie pelo `iniciar_tradutor_jogos.bat` e espere a mensagem de que tudo esta pronto. Se o bridge for iniciado manualmente, acompanhe `http://127.0.0.1:8765/ready`; o endpoint responde HTTP 200 depois do aquecimento.
+1. Inicie o bridge Python.
+2. Abra `chrome://extensions` ou `edge://extensions`.
+3. Ative o modo de desenvolvedor.
+4. Clique em **Carregar sem compactação**.
+5. Selecione a pasta `extension` deste repositório.
 
-## Desempenho
+O atalho da extensão pode ser alterado em `chrome://extensions/shortcuts` ou `edge://extensions/shortcuts`.
 
-O caminho desktop rapido aplica estas otimizacoes:
+## Testes
 
-- abre o seletor imediatamente e captura somente depois que a regiao foi escolhida;
-- recorta a regiao no processo principal do Electron e envia apenas esse PNG ao bridge;
-- usa Tesseract local com filtragem de artefatos pela posicao e confianca das palavras;
-- reutiliza resultados por imagem e texto com caches LRU/TTL;
-- cancela trabalho obsoleto quando uma captura mais nova chega;
-- reutiliza a janela de traducao e conexoes HTTP.
-
-O Electron e o bridge imprimem linhas `[performance]` com os tempos de captura, recorte, codificacao, OCR, traducao e total. O JSON retornado tambem inclui `performance.timings` e os indicadores de cache.
-
-### A traducao ficou estranha
-
-Pode acontecer. As vezes o OCR le certo, mas o tradutor entende a frase mal. Tente selecionar uma area menor, pegando apenas o texto.
-
-### PowerShell bloqueou a ativacao da venv
-
-Nao precisa ativar nada. Use sempre este formato:
+Bridge Python:
 
 ```powershell
-.\.venv\Scripts\python.exe -m hq_ocr_bridge
+cd .\bridge
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-## Usar Sem Instalar No PC
+Electron:
 
-Ainda nao tem servidor publico pronto.
+```powershell
+cd .\electron_client
+npm test
+```
 
-Enquanto nao existir um servidor online, cada pessoa precisa rodar o programa local no proprio PC.
+Extensão:
+
+```powershell
+cd .\extension
+npm test
+```
+
+## Desempenho e privacidade
+
+O Electron e o bridge registram linhas `[performance]` contendo apenas métricas de tempo e estado dos caches. Em condições normais, imagens e textos reconhecidos não são gravados em disco.
+
+Capturas de diagnóstico podem conter informações sensíveis. Ative `HQ_OCR_SAVE_DEBUG_CAPTURES` somente durante investigação e não publique a pasta `debug-captures`.
+
+Principais otimizações do fluxo:
+
+- captura restrita à área selecionada;
+- detecção de imagem e texto repetidos;
+- caches LRU com expiração;
+- uma única captura/OCR automática por vez;
+- cancelamento lógico de trabalho obsoleto;
+- prioridade para a legenda mais recente;
+- reutilização da janela de tradução e das conexões HTTP.
+
+## Estrutura do repositório
+
+```text
+bridge/           servidor local, OCR, tradução e testes Python
+electron_client/  aplicativo desktop Electron
+extension/        extensão alternativa para Chrome e Edge
+desktop_client/   cliente desktop Python legado
+docs/             documentação técnica de desenvolvimento
+```
+
+## Limitações atuais
+
+- a tradução não funciona offline;
+- o endpoint público do Google pode mudar ou aplicar limites;
+- não existe instalador pronto versionado no repositório;
+- o resultado depende da legibilidade, idioma, fonte e contraste da imagem;
+- ainda não há um arquivo `LICENSE` na raiz do projeto.
+
+## Contribuição
+
+Antes de enviar uma alteração, mantenha cada commit focado, não inclua modelos OCR, ambientes virtuais, capturas ou credenciais e execute os testes relacionados.

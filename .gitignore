@@ -1,19 +1,76 @@
-debug-captures/
-bridge/debug-captures/
-.venv/
-bridge/.venv/
-bridge/.paddlex-cache/
-.hermes/
-exemplos do OCR/
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
 __pycache__/
 *.py[cod]
+*.pyd
+*.so
+.venv/
+venv/
+env/
 .pytest_cache/
 .pytest-tmp/
 .pytest-*/
-bridge/.pytest-tmp/
-bridge/.pytest-*/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node.js and Electron
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 dist/
 build/
+out/
+release/
+*.blockmap
+*.appx
+*.msi
+*.msix
+*.exe
+
+# OCR models and framework caches
+.paddlex-cache/
+.EasyOCR/
+models/
+*.onnx
+*.pdmodel
+*.pdiparams
+*.pdiparams.info
+
+# Runtime data and diagnostics
 logs/
+*.log
+debug-captures/
+erro tradução/
+exemplos do OCR/
+*.tmp
+*.temp
+
+# Local tools and agent metadata
+.hermes/
+.codex/
+.agents/
+
+# Editors
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*~
+
+# Operating systems
 .DS_Store
+Thumbs.db
+Desktop.ini
