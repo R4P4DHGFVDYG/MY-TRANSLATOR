@@ -2,7 +2,7 @@
 
 Aplicativo desktop para traduzir legendas e textos exibidos na tela usando OCR. O usuário define uma área uma única vez, e o aplicativo monitora essa região, reconhece apenas conteúdos novos e exibe a tradução sobre o jogo ou programa.
 
-O projeto também preserva uma extensão para Chrome/Edge e um cliente desktop Python como alternativas, mas o cliente principal é o aplicativo Electron.
+Este repositório documenta e mantém o aplicativo Electron, seu bridge Python e o cliente desktop Python legado.
 
 ## Funcionalidades
 
@@ -138,16 +138,6 @@ O seletor e a legenda usam uma janela de sobreposição no nível mais alto. O m
 
 Tela cheia exclusiva e alguns sistemas anti-cheat podem bloquear a captura ou qualquer sobreposição externa. Nesses casos, altere o modo de exibição dentro do jogo. O projeto não injeta código no processo do jogo.
 
-## Extensão para navegador
-
-1. Inicie o bridge Python.
-2. Abra `chrome://extensions` ou `edge://extensions`.
-3. Ative o modo de desenvolvedor.
-4. Clique em **Carregar sem compactação**.
-5. Selecione a pasta `extension` deste repositório.
-
-O atalho da extensão pode ser alterado em `chrome://extensions/shortcuts` ou `edge://extensions/shortcuts`.
-
 ## Testes
 
 Bridge Python:
@@ -162,13 +152,6 @@ Electron:
 
 ```powershell
 cd .\electron_client
-npm test
-```
-
-Extensão:
-
-```powershell
-cd .\extension
 npm test
 ```
 
@@ -193,7 +176,6 @@ Principais otimizações do fluxo:
 ```text
 bridge/           servidor local, OCR, tradução e testes Python
 electron_client/  aplicativo desktop Electron
-extension/        extensão alternativa para Chrome e Edge
 desktop_client/   cliente desktop Python legado
 docs/             documentação técnica de desenvolvimento
 ```

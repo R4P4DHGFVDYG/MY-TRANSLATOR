@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "G.R.C TRANSLATOR",
+  "name": "HQ OCR Translator",
   "version": "0.1.0",
   "description": "Selecione uma area visivel da HQ e traduza com OCR local.",
   "permissions": ["activeTab", "scripting", "storage"],
@@ -10,7 +10,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "G.R.C TRANSLATOR — traduzir area",
+    "default_title": "Traduzir area da HQ",
     "default_popup": "popup.html"
   },
   "commands": {
