@@ -360,6 +360,13 @@
             text-transform: uppercase;
         }
 
+        .field-help {
+            margin-top: 7px;
+            color: var(--muted);
+            font-size: 10px;
+            line-height: 1.45;
+        }
+
         .value-badge {
             padding: 2px 7px;
             border: 1px solid rgba(180, 154, 255, 0.2);
@@ -566,6 +573,30 @@
                 <div class="panel-heading">
                     <div class="panel-icon">
                         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M4 4h12v12H4zM7 7h6v6H7zM2.5 7H4m-1.5 3H4m-1.5 3H4M16 7h1.5M16 10h1.5M16 13h1.5M7 2.5V4m3-1.5V4m3-1.5V4M7 16v1.5M10 16v1.5M13 16v1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="panel-title">Mecanismo OCR</div>
+                        <div class="panel-description">Escolha como o texto será reconhecido</div>
+                    </div>
+                </div>
+                <div class="field-grid single">
+                    <div class="field">
+                        <label for="ocrEngine">OCR utilizado</label>
+                        <select id="ocrEngine">
+                            <option value="tesseract" selected>Tesseract — Windows</option>
+                            <option value="paddleocr">PaddleOCR — Inteligência artificial</option>
+                        </select>
+                        <div class="field-help" id="ocrEngineHint">Tesseract inicia mais rápido e funciona bem com fontes pixeladas.</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div class="panel-icon">
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
                             <path d="M3 5h9M7.5 3v2c0 4-1.7 6.8-4.5 8.8M5.3 9.5c1.1 1.4 2.4 2.5 4 3.3M11 17l3.2-8 3.2 8m-5.2-3h4" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </div>
@@ -680,7 +711,26 @@
 
     <script>
         const desktopApi = window.ocrDesktop;
-        const settingIds = ['source', 'target', 'position', 'textColor', 'bgColor', 'opacity', 'mouseShortcut'];
+        const OCR_STORAGE_KEY = 'grc-translator-ocr-engine';
+        const allowedOcrEngines = new Set(['tesseract', 'paddleocr']);
+        const settingIds = ['source', 'target', 'ocrEngine', 'position', 'textColor', 'bgColor', 'opacity', 'mouseShortcut'];
+
+        function restoreOcrEngine() {
+            try {
+                const storedEngine = localStorage.getItem(OCR_STORAGE_KEY);
+                if (allowedOcrEngines.has(storedEngine)) {
+                    document.getElementById('ocrEngine').value = storedEngine;
+                }
+            } catch {
+                // The validated default remains active when storage is unavailable.
+            }
+        }
+
+        function updateOcrHint(engine) {
+            document.getElementById('ocrEngineHint').textContent = engine === 'paddleocr'
+                ? 'PaddleOCR pode reconhecer fontes difíceis, mas o primeiro uso demora mais.'
+                : 'Tesseract inicia mais rápido e funciona bem com fontes pixeladas.';
+        }
 
         function updateVisualValues() {
             const opacity = document.getElementById('opacity');
@@ -695,9 +745,17 @@
 
         function saveSettings() {
             updateVisualValues();
+            const ocrEngine = document.getElementById('ocrEngine').value;
+            updateOcrHint(ocrEngine);
+            try {
+                localStorage.setItem(OCR_STORAGE_KEY, ocrEngine);
+            } catch {
+                // The selection still applies for the current session.
+            }
             desktopApi.settings.update({
                 sourceLang: document.getElementById('source').value,
                 targetLang: document.getElementById('target').value,
+                ocrEngine,
                 position: document.getElementById('position').value,
                 textColor: document.getElementById('textColor').value,
                 bgColor: document.getElementById('bgColor').value,
@@ -728,6 +786,7 @@
         document.getElementById('closeButton').addEventListener('click', () => desktopApi.settings.close());
         document.getElementById('captureButton').addEventListener('click', () => desktopApi.settings.capture());
 
+        restoreOcrEngine();
         saveSettings();
         refreshBridgeStatus();
         const statusTimer = setInterval(refreshBridgeStatus, 5000);

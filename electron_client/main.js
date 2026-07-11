@@ -21,6 +21,7 @@ const RESULT_CACHE_TTL_MS = 10 * 60 * 1000;
 const CLIENT_ID = randomUUID();
 const SOURCE_LANGUAGES = new Set(['en']);
 const TARGET_LANGUAGES = new Set(['pt-BR', 'en']);
+const OCR_ENGINES = new Set(['tesseract', 'paddleocr']);
 const TOAST_POSITIONS = new Set(['custom', 'mouse', 'top', 'bottom', 'center']);
 
 let settingsWindow = null;
@@ -47,6 +48,7 @@ app.setName(APP_NAME);
 const settings = {
     sourceLang: 'en',
     targetLang: 'pt-BR',
+    ocrEngine: 'tesseract',
     position: 'custom',
     textColor: '#ffffff',
     bgColor: '#160d26',
@@ -585,6 +587,9 @@ function updateSettings(newSettings) {
     if (TARGET_LANGUAGES.has(newSettings.targetLang)) {
         settings.targetLang = newSettings.targetLang;
     }
+    if (OCR_ENGINES.has(newSettings.ocrEngine)) {
+        settings.ocrEngine = newSettings.ocrEngine;
+    }
     if (TOAST_POSITIONS.has(newSettings.position)) {
         settings.position = newSettings.position;
     }
@@ -686,7 +691,7 @@ function errorMessageForTranslation(error, timedOut) {
 }
 
 function resultCacheKey(selection, requestSettings) {
-    return `${requestSettings.sourceLang}\0${requestSettings.targetLang}\0${selection.digest}`;
+    return `${requestSettings.ocrEngine}\0${requestSettings.sourceLang}\0${requestSettings.targetLang}\0${selection.digest}`;
 }
 
 function getCachedResult(key) {
@@ -766,7 +771,7 @@ async function translateSelection(selection, anchorPoint, display, translationId
                 viewport: { width: selection.width, height: selection.height },
                 source: requestSettings.sourceLang,
                 target: requestSettings.targetLang,
-                engines: ['tesseract'],
+                engines: [requestSettings.ocrEngine],
                 clientId: CLIENT_ID,
                 requestId: translationId
             })
