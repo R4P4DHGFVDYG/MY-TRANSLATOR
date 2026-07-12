@@ -246,14 +246,14 @@
         }
 
         .hero h1 {
-            max-width: 290px;
+            max-width: 560px;
             font-size: 23px;
             line-height: 1.15;
             letter-spacing: -0.035em;
         }
 
         .hero p {
-            max-width: 310px;
+            max-width: 620px;
             margin-top: 7px;
             color: var(--muted);
             font-size: 12px;
@@ -313,6 +313,17 @@
             border-radius: 0;
             background: linear-gradient(145deg, rgba(38, 23, 61, 0.8), rgba(20, 11, 35, 0.82));
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+        }
+
+        .settings-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+            gap: 12px;
+            align-items: start;
+        }
+
+        .settings-column {
+            min-width: 0;
         }
 
         .panel-heading {
@@ -475,11 +486,13 @@
         }
 
         .shortcut-row {
-            display: block;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
         }
 
         .shortcut-item + .shortcut-item {
-            margin-top: 14px;
+            margin-top: 0;
         }
 
         .shortcut-label {
@@ -612,7 +625,9 @@
                 </div>
             </section>
 
-            <section class="panel">
+            <div class="settings-grid">
+                <div class="settings-column">
+                    <section class="panel">
                 <div class="panel-heading">
                     <div class="panel-icon">
                         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -635,9 +650,9 @@
                         <div class="field-help" id="ocrEngineHint">Tesseract inicia mais rápido e funciona bem com fontes pixeladas.</div>
                     </div>
                 </div>
-            </section>
+                    </section>
 
-            <section class="panel">
+                    <section class="panel">
                 <div class="panel-heading">
                     <div class="panel-icon">
                         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -664,9 +679,12 @@
                         </select>
                     </div>
                 </div>
-            </section>
+                    </section>
+                </div>
 
-            <section class="panel">
+                <div class="settings-column">
+
+                    <section class="panel">
                 <div class="panel-heading">
                     <div class="panel-icon">
                         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -676,10 +694,10 @@
                     </div>
                     <div>
                         <div class="panel-title">Aparência da legenda</div>
-                        <div class="panel-description">Posição, cores e transparência</div>
+                        <div class="panel-description">Fonte, alinhamento, posição, cores e transparência</div>
                     </div>
                 </div>
-                <div class="field-grid single" style="margin-bottom: 12px;">
+                <div class="field-grid" style="margin-bottom: 12px;">
                     <div class="field">
                         <label for="position">Posição na tela</label>
                         <select id="position">
@@ -688,6 +706,31 @@
                             <option value="top">Topo da tela</option>
                             <option value="bottom">Rodapé da tela</option>
                             <option value="center">Centro da tela</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="fontFamily">Estilo da fonte</label>
+                        <select id="fontFamily">
+                            <option value="Segoe UI" selected>Segoe UI</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="field-grid" style="margin-bottom: 12px;">
+                    <div class="field">
+                        <div class="field-label-row">
+                            <label for="fontSize" style="margin:0">Tamanho da fonte</label>
+                            <span class="value-badge" id="fontSizeValue">18 px</span>
+                        </div>
+                        <div class="range-wrap">
+                            <input type="range" id="fontSize" min="12" max="36" value="18">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="textAlign">Alinhamento do texto</label>
+                        <select id="textAlign">
+                            <option value="left" selected>Esquerda</option>
+                            <option value="center">Centralizado</option>
+                            <option value="right">Direita</option>
                         </select>
                     </div>
                 </div>
@@ -716,9 +759,9 @@
                         <input type="range" id="opacity" min="10" max="100" value="94">
                     </div>
                 </div>
-            </section>
+                    </section>
 
-            <section class="panel">
+                    <section class="panel">
                 <div class="panel-heading">
                     <div class="panel-icon">
                         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -757,7 +800,9 @@
                         <div class="shortcut-hint" id="stopShortcutHint">Interrompe a seleção ou a leitura ativa.</div>
                     </div>
                 </div>
-            </section>
+                    </section>
+                </div>
+            </div>
 
             <footer class="footer">
                 <span>G.R.C Translator · v1.0</span>
@@ -769,6 +814,7 @@
     <script>
         const desktopApi = window.ocrDesktop;
         const OCR_STORAGE_KEY = 'grc-translator-ocr-engine';
+        const APPEARANCE_STORAGE_KEY = 'grc-translator-appearance';
         const shortcutConfigs = {
             fixed: {
                 storageKey: 'grc-translator-capture-shortcut',
@@ -784,7 +830,10 @@
             }
         };
         const allowedOcrEngines = new Set(['tesseract', 'paddleocr', 'easyocr']);
-        const settingIds = ['source', 'target', 'ocrEngine', 'position', 'textColor', 'bgColor', 'opacity'];
+        const settingIds = [
+            'source', 'target', 'ocrEngine', 'position', 'fontFamily', 'fontSize',
+            'textAlign', 'textColor', 'bgColor', 'opacity'
+        ];
         let recordingShortcutAction = null;
         const currentShortcuts = Object.fromEntries(
             Object.entries(shortcutConfigs).map(([action, config]) => [action, { ...config.defaultShortcut }])
@@ -879,6 +928,67 @@
             }
         }
 
+        async function loadSystemFonts() {
+            const select = document.getElementById('fontFamily');
+            try {
+                const fonts = await desktopApi.settings.getSystemFonts();
+                if (!Array.isArray(fonts)) {
+                    return;
+                }
+                const current = select.value;
+                select.replaceChildren();
+                for (const font of fonts) {
+                    if (typeof font !== 'string' || !font) {
+                        continue;
+                    }
+                    const option = document.createElement('option');
+                    option.value = font;
+                    option.textContent = font;
+                    option.style.fontFamily = `"${font.replace(/[;{}"\\]/g, '')}", sans-serif`;
+                    select.appendChild(option);
+                }
+                select.value = [...select.options].some(option => option.value === current)
+                    ? current
+                    : 'Segoe UI';
+            } catch {
+                // Segoe UI remains available as the safe default.
+            }
+        }
+
+        function restoreAppearanceSettings() {
+            try {
+                const stored = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY));
+                if (!stored || typeof stored !== 'object') {
+                    return;
+                }
+                const allowedValues = {
+                    position: new Set(['custom', 'mouse', 'top', 'bottom', 'center']),
+                    textAlign: new Set(['left', 'center', 'right'])
+                };
+                for (const id of ['position', 'textAlign']) {
+                    if (allowedValues[id].has(stored[id])) {
+                        document.getElementById(id).value = stored[id];
+                    }
+                }
+                for (const id of ['textColor', 'bgColor']) {
+                    if (/^#[0-9a-f]{6}$/i.test(stored[id])) {
+                        document.getElementById(id).value = stored[id];
+                    }
+                }
+                for (const id of ['fontSize', 'opacity']) {
+                    if (stored[id] !== undefined && Number.isFinite(Number(stored[id]))) {
+                        document.getElementById(id).value = stored[id];
+                    }
+                }
+                const fontSelect = document.getElementById('fontFamily');
+                if ([...fontSelect.options].some(option => option.value === stored.fontFamily)) {
+                    fontSelect.value = stored.fontFamily;
+                }
+            } catch {
+                // The default appearance remains active when storage is unavailable.
+            }
+        }
+
         function updateOcrHint(engine) {
             const hints = {
                 tesseract: 'Tesseract inicia mais rápido e funciona bem com fontes pixeladas.',
@@ -908,6 +1018,11 @@
             document.getElementById('opacityValue').textContent = `${percentage}%`;
             opacity.style.background = `linear-gradient(90deg, var(--purple) ${percentage}%, rgba(196, 173, 239, 0.2) ${percentage}%)`;
 
+            const fontSize = document.getElementById('fontSize');
+            const fontSizePercentage = ((Number(fontSize.value) - 12) / (36 - 12)) * 100;
+            document.getElementById('fontSizeValue').textContent = `${fontSize.value} px`;
+            fontSize.style.background = `linear-gradient(90deg, var(--purple) ${fontSizePercentage}%, rgba(196, 173, 239, 0.2) ${fontSizePercentage}%)`;
+
             for (const id of ['textColor', 'bgColor']) {
                 document.getElementById(`${id}Value`).textContent = document.getElementById(id).value.toUpperCase();
             }
@@ -919,6 +1034,15 @@
             updateOcrHint(ocrEngine);
             try {
                 localStorage.setItem(OCR_STORAGE_KEY, ocrEngine);
+                localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({
+                    position: document.getElementById('position').value,
+                    fontFamily: document.getElementById('fontFamily').value,
+                    fontSize: Number(document.getElementById('fontSize').value),
+                    textAlign: document.getElementById('textAlign').value,
+                    textColor: document.getElementById('textColor').value,
+                    bgColor: document.getElementById('bgColor').value,
+                    opacity: Number(document.getElementById('opacity').value)
+                }));
             } catch {
                 // The selection still applies for the current session.
             }
@@ -927,6 +1051,9 @@
                 targetLang: document.getElementById('target').value,
                 ocrEngine,
                 position: document.getElementById('position').value,
+                fontFamily: document.getElementById('fontFamily').value,
+                fontSize: Number(document.getElementById('fontSize').value),
+                textAlign: document.getElementById('textAlign').value,
                 textColor: document.getElementById('textColor').value,
                 bgColor: document.getElementById('bgColor').value,
                 opacity: document.getElementById('opacity').value / 100
@@ -1013,9 +1140,15 @@
             }
         });
 
-        restoreOcrEngine();
+        async function initializeSettings() {
+            restoreOcrEngine();
+            await loadSystemFonts();
+            restoreAppearanceSettings();
+            saveSettings();
+        }
+
         restoreCaptureShortcuts();
-        saveSettings();
+        void initializeSettings();
         refreshBridgeStatus();
         desktopApi.settings.getFixedAreaState().then(updateFixedAreaState).catch(() => {});
         const unsubscribeFixedArea = desktopApi.settings.onFixedAreaState(updateFixedAreaState);

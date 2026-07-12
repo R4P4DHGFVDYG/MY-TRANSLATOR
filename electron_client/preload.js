@@ -21,7 +21,8 @@ contextBridge.exposeInMainWorld('ocrDesktop', {
         toggleFixedArea: () => ipcRenderer.send('toggle-fixed-area'),
         getFixedAreaState: () => ipcRenderer.invoke('fixed-area-state'),
         onFixedAreaState: callback => subscribe('fixed-area-state', callback),
-        getBridgeStatus: () => ipcRenderer.invoke('bridge-status')
+        getBridgeStatus: () => ipcRenderer.invoke('bridge-status'),
+        getSystemFonts: () => ipcRenderer.invoke('system-fonts')
     },
     snip: {
         complete: selection => ipcRenderer.send('snip-complete', selection),

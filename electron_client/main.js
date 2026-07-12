@@ -4,6 +4,7 @@ const { createHash, randomUUID } = require('crypto');
 const path = require('path');
 const { FixedAreaChangeTracker, rectanglesOverlap } = require('./fixed_area');
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
+const { normalizeFontFamily, normalizeFontSize, normalizeTextAlign } = require('./appearance');
 
 const APP_NAME = 'G.R.C TRANSLATOR';
 const APP_ICON_PATH = path.join(__dirname, 'assets', 'spider-intro.png');
@@ -27,6 +28,7 @@ const TARGET_LANGUAGES = new Set(['pt-BR', 'en']);
 const OCR_ENGINES = new Set(['tesseract', 'paddleocr', 'easyocr']);
 const TOAST_POSITIONS = new Set(['custom', 'mouse', 'top', 'bottom', 'center']);
 const SHORTCUT_ACTIONS = new Set(['fixed', 'temporary', 'stop']);
+const FALLBACK_SYSTEM_FONTS = ['Segoe UI', 'Arial', 'Calibri', 'Tahoma', 'Verdana', 'Georgia', 'Consolas'];
 
 let settingsWindow = null;
 let introWindow = null;
@@ -52,6 +54,7 @@ let fixedCaptureTimer = null;
 let fixedCaptureGeneration = 0;
 let fixedCaptureRunning = false;
 let fixedCaptureLastError = '';
+let systemFontsCache = null;
 const resultCache = new Map();
 const fixedCaptureTracker = new FixedAreaChangeTracker();
 
@@ -65,6 +68,9 @@ const settings = {
     textColor: '#ffffff',
     bgColor: '#160d26',
     opacity: 0.94,
+    fontSize: 18,
+    fontFamily: 'Segoe UI',
+    textAlign: 'left',
     customX: -1,
     customY: -1,
     captureShortcutType: 'keyboard',
@@ -195,6 +201,51 @@ function getPowerShellPath() {
 
 function isMouseShortcutButton(value) {
     return value === 'MBUTTON' || value === 'XBUTTON1' || value === 'XBUTTON2';
+}
+
+function getSystemFonts() {
+    if (systemFontsCache) {
+        return Promise.resolve(systemFontsCache);
+    }
+    if (process.platform !== 'win32') {
+        systemFontsCache = [...FALLBACK_SYSTEM_FONTS];
+        return Promise.resolve(systemFontsCache);
+    }
+
+    return new Promise(resolve => {
+        const script = [
+            '$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()',
+            '$fontKeys = @("HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts", "HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts")',
+            '$fontKeys | ForEach-Object { Get-ItemProperty -LiteralPath $_ -ErrorAction SilentlyContinue } | ForEach-Object { $_.PSObject.Properties } | Where-Object { $_.Name -notmatch "^PS" } | ForEach-Object { $_.Name -replace "\\s+\\([^)]*\\)$", "" } | Sort-Object -Unique'
+        ].join('; ');
+        const child = spawn(getPowerShellPath(), ['-NoProfile', '-Command', script], {
+            windowsHide: true,
+            stdio: ['ignore', 'pipe', 'ignore']
+        });
+        let output = '';
+        let finished = false;
+        const timeout = setTimeout(() => child.kill(), 4000);
+        child.stdout.on('data', data => {
+            if (output.length < 512_000) {
+                output += data.toString('utf8');
+            }
+        });
+        const finish = () => {
+            if (finished) {
+                return;
+            }
+            finished = true;
+            clearTimeout(timeout);
+            const discovered = output.split(/\r?\n/)
+                .map(font => font.trim())
+                .filter(font => font && font.length <= 120 && !/[;{}"\\]/.test(font));
+            systemFontsCache = [...new Set([...FALLBACK_SYSTEM_FONTS, ...discovered])]
+                .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+            resolve(systemFontsCache);
+        };
+        child.once('error', finish);
+        child.once('close', finish);
+    });
 }
 
 function stopSideMouseShortcut() {
@@ -338,7 +389,7 @@ function createSettingsWindow() {
     settingsWindow = new BrowserWindow({
         title: APP_NAME,
         icon: APP_ICON_PATH,
-        width: 580,
+        width: 1040,
         height: 720,
         frame: false,
         transparent: true,
@@ -518,7 +569,7 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
     };
     let display = preferredDisplay || screen.getDisplayNearestPoint(anchorPoint);
     let workArea = display.workArea;
-    pendingToastPayload = { text, style: currentSettings };
+    pendingToastPayload = { text, style: { ...settings } };
 
     let currentToast = toastWindow;
     const wasAlreadyOpen = isWindowAlive(currentToast);
@@ -928,6 +979,19 @@ function updateSettings(newSettings) {
     if (isValidColor(newSettings.bgColor)) {
         settings.bgColor = newSettings.bgColor;
     }
+    const fontFamily = normalizeFontFamily(newSettings.fontFamily);
+    if (fontFamily) {
+        settings.fontFamily = fontFamily;
+    }
+    const textAlign = normalizeTextAlign(newSettings.textAlign);
+    if (textAlign) {
+        settings.textAlign = textAlign;
+    }
+
+    const fontSize = normalizeFontSize(newSettings.fontSize);
+    if (fontSize !== null) {
+        settings.fontSize = fontSize;
+    }
 
     const opacity = Number(newSettings.opacity);
     if (Number.isFinite(opacity)) {
@@ -938,6 +1002,13 @@ function updateSettings(newSettings) {
         const coordinate = Number(newSettings[key]);
         if (Number.isFinite(coordinate)) {
             settings[key] = Math.round(coordinate);
+        }
+    }
+
+    if (pendingToastPayload) {
+        pendingToastPayload = { ...pendingToastPayload, style: { ...settings } };
+        if (toastReady) {
+            sendToWindow(toastWindow, 'set-text', pendingToastPayload);
         }
     }
 
@@ -1231,6 +1302,13 @@ ipcMain.handle('bridge-status', event => {
         return { state: 'offline', label: 'Status indisponível' };
     }
     return getBridgeStatus();
+});
+
+ipcMain.handle('system-fonts', event => {
+    if (!isEventFromWindow(event, settingsWindow)) {
+        return [...FALLBACK_SYSTEM_FONTS];
+    }
+    return getSystemFonts();
 });
 
 ipcMain.on('snip-complete', (event, payload) => {

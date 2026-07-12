@@ -116,6 +116,7 @@
         }
 
         #content {
+            flex: 1;
             max-width: 100%;
             color: inherit;
             font-size: 18px;
@@ -208,8 +209,18 @@
             const loading = text.trim().toLowerCase().startsWith('traduzindo');
 
             content.innerText = text;
+            const fontSize = Math.min(36, Math.max(12, Number(style.fontSize) || 18));
+            const fontFamily = typeof style.fontFamily === 'string' && style.fontFamily
+                ? style.fontFamily.replace(/[;{}"\\]/g, '')
+                : 'Segoe UI';
+            const textAlign = ['left', 'center', 'right'].includes(style.textAlign)
+                ? style.textAlign
+                : 'left';
             toastBox.classList.toggle('loading', loading);
             toastBox.style.color = style.textColor || '#ffffff';
+            content.style.fontSize = `${loading ? 15 : fontSize}px`;
+            content.style.fontFamily = `"${fontFamily}", "Segoe UI", sans-serif`;
+            content.style.textAlign = textAlign;
             toastBox.style.setProperty('--panel-color', style.bgColor || '#160d26');
             toastBox.style.setProperty(
                 '--panel-highlight',
