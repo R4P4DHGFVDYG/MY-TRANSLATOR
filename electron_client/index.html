@@ -478,6 +478,20 @@
             display: block;
         }
 
+        .shortcut-item + .shortcut-item {
+            margin-top: 14px;
+        }
+
+        .shortcut-label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--muted);
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
         .shortcut-recorder-button {
             width: 100%;
             min-height: 44px;
@@ -713,16 +727,35 @@
                         </svg>
                     </div>
                     <div>
-                        <div class="panel-title">Atalho de captura</div>
-                        <div class="panel-description">Pressione a combinação ou o botão que quiser usar</div>
+                        <div class="panel-title">Atalhos de captura</div>
+                        <div class="panel-description">Escolha uma tecla ou botão do mouse para cada ação</div>
                     </div>
                 </div>
                 <div class="shortcut-row">
-                    <button class="shortcut-recorder-button" id="shortcutRecorder" type="button">
-                        <span id="shortcutValue">Ctrl + Shift + Q</span>
-                        <span>Alterar</span>
-                    </button>
-                    <div class="shortcut-hint" id="shortcutHint">Clique para gravar um atalho de teclado ou mouse.</div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-label">Área automática</span>
+                        <button class="shortcut-recorder-button" id="fixedShortcutRecorder" type="button" data-shortcut-action="fixed">
+                            <span id="fixedShortcutValue">Ctrl + Shift + Q</span>
+                            <span>Alterar</span>
+                        </button>
+                        <div class="shortcut-hint" id="fixedShortcutHint">Seleciona uma área que será lida continuamente.</div>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-label">Área temporária</span>
+                        <button class="shortcut-recorder-button" id="temporaryShortcutRecorder" type="button" data-shortcut-action="temporary">
+                            <span id="temporaryShortcutValue">Ctrl + Shift + W</span>
+                            <span>Alterar</span>
+                        </button>
+                        <div class="shortcut-hint" id="temporaryShortcutHint">Seleciona, traduz uma vez e encerra a área.</div>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-label">Parar área</span>
+                        <button class="shortcut-recorder-button" id="stopShortcutRecorder" type="button" data-shortcut-action="stop">
+                            <span id="stopShortcutValue">Ctrl + Shift + E</span>
+                            <span>Alterar</span>
+                        </button>
+                        <div class="shortcut-hint" id="stopShortcutHint">Interrompe a seleção ou a leitura ativa.</div>
+                    </div>
                 </div>
             </section>
 
@@ -736,11 +769,26 @@
     <script>
         const desktopApi = window.ocrDesktop;
         const OCR_STORAGE_KEY = 'grc-translator-ocr-engine';
-        const SHORTCUT_STORAGE_KEY = 'grc-translator-capture-shortcut';
+        const shortcutConfigs = {
+            fixed: {
+                storageKey: 'grc-translator-capture-shortcut',
+                defaultShortcut: { type: 'keyboard', value: 'Ctrl+Shift+Q' }
+            },
+            temporary: {
+                storageKey: 'grc-translator-temporary-shortcut',
+                defaultShortcut: { type: 'keyboard', value: 'Ctrl+Shift+W' }
+            },
+            stop: {
+                storageKey: 'grc-translator-stop-shortcut',
+                defaultShortcut: { type: 'keyboard', value: 'Ctrl+Shift+E' }
+            }
+        };
         const allowedOcrEngines = new Set(['tesseract', 'paddleocr', 'easyocr']);
         const settingIds = ['source', 'target', 'ocrEngine', 'position', 'textColor', 'bgColor', 'opacity'];
-        let isRecordingShortcut = false;
-        let currentShortcut = { type: 'keyboard', value: 'Ctrl+Shift+Q' };
+        let recordingShortcutAction = null;
+        const currentShortcuts = Object.fromEntries(
+            Object.entries(shortcutConfigs).map(([action, config]) => [action, { ...config.defaultShortcut }])
+        );
 
         function shortcutLabel(shortcut) {
             if (shortcut.type === 'mouse') {
@@ -753,34 +801,37 @@
             return shortcut.value.split('+').join(' + ');
         }
 
-        function setShortcutHint(message, isError = false) {
-            const hint = document.getElementById('shortcutHint');
+        function setShortcutHint(action, message, isError = false) {
+            const hint = document.getElementById(`${action}ShortcutHint`);
             hint.textContent = message;
             hint.classList.toggle('error', isError);
         }
 
-        function setShortcutRecording(recording) {
-            isRecordingShortcut = recording;
-            const button = document.getElementById('shortcutRecorder');
-            button.classList.toggle('recording', recording);
-            button.querySelector('span:last-child').textContent = recording ? 'Ouvindo...' : 'Alterar';
-            if (recording) {
-                setShortcutHint('Pressione uma combinação, F1–F24 ou um botão do mouse. ESC cancela.');
+        function setShortcutRecording(action) {
+            for (const itemAction of Object.keys(shortcutConfigs)) {
+                const recording = action === itemAction;
+                const button = document.getElementById(`${itemAction}ShortcutRecorder`);
+                button.classList.toggle('recording', recording);
+                button.querySelector('span:last-child').textContent = recording ? 'Ouvindo...' : 'Alterar';
+            }
+            recordingShortcutAction = action;
+            if (action) {
+                setShortcutHint(action, 'Pressione uma combinação, F1–F24 ou um botão do mouse. ESC cancela.');
             }
         }
 
-        async function applyCaptureShortcut(shortcut, persist = true) {
-            const result = await desktopApi.settings.setCaptureShortcut(shortcut);
+        async function applyCaptureShortcut(action, shortcut, persist = true) {
+            const result = await desktopApi.settings.setCaptureShortcut(action, shortcut);
             if (!result?.ok) {
-                setShortcutHint(result?.error || 'Não foi possível registrar esse atalho.', true);
+                setShortcutHint(action, result?.error || 'Não foi possível registrar esse atalho.', true);
                 return false;
             }
-            currentShortcut = result.shortcut;
-            document.getElementById('shortcutValue').textContent = shortcutLabel(currentShortcut);
-            setShortcutHint('Atalho ativo. Clique para escolher outro.');
+            currentShortcuts[action] = result.shortcut;
+            document.getElementById(`${action}ShortcutValue`).textContent = shortcutLabel(result.shortcut);
+            setShortcutHint(action, 'Atalho ativo. Clique para escolher outro.');
             if (persist) {
                 try {
-                    localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(currentShortcut));
+                    localStorage.setItem(shortcutConfigs[action].storageKey, JSON.stringify(result.shortcut));
                 } catch {
                     // The shortcut remains active for the current session.
                 }
@@ -788,18 +839,20 @@
             return true;
         }
 
-        async function restoreCaptureShortcut() {
-            let shortcut = currentShortcut;
-            try {
-                const stored = JSON.parse(localStorage.getItem(SHORTCUT_STORAGE_KEY));
-                if (stored && typeof stored === 'object') {
-                    shortcut = stored;
+        async function restoreCaptureShortcuts() {
+            for (const [action, config] of Object.entries(shortcutConfigs)) {
+                let shortcut = currentShortcuts[action];
+                try {
+                    const stored = JSON.parse(localStorage.getItem(config.storageKey));
+                    if (stored && typeof stored === 'object') {
+                        shortcut = stored;
+                    }
+                } catch {
+                    // The validated default remains active when storage is unavailable.
                 }
-            } catch {
-                // The validated default remains active when storage is unavailable.
-            }
-            if (!await applyCaptureShortcut(shortcut, false) && shortcut !== currentShortcut) {
-                await applyCaptureShortcut(currentShortcut, false);
+                if (!await applyCaptureShortcut(action, shortcut, false) && shortcut !== currentShortcuts[action]) {
+                    await applyCaptureShortcut(action, currentShortcuts[action], false);
+                }
             }
         }
 
@@ -901,23 +954,26 @@
         document.getElementById('minimizeButton').addEventListener('click', () => desktopApi.settings.minimize());
         document.getElementById('closeButton').addEventListener('click', () => desktopApi.settings.close());
         document.getElementById('fixedAreaButton').addEventListener('click', () => desktopApi.settings.toggleFixedArea());
-        document.getElementById('shortcutRecorder').addEventListener('click', () => setShortcutRecording(true));
+        for (const action of Object.keys(shortcutConfigs)) {
+            document.getElementById(`${action}ShortcutRecorder`).addEventListener('click', () => setShortcutRecording(action));
+        }
 
         document.addEventListener('keydown', async event => {
-            if (!isRecordingShortcut || event.repeat) {
+            if (!recordingShortcutAction || event.repeat) {
                 return;
             }
             event.preventDefault();
             event.stopPropagation();
             if (event.key === 'Escape') {
-                setShortcutRecording(false);
-                setShortcutHint('Alteração cancelada.');
+                const action = recordingShortcutAction;
+                setShortcutRecording(null);
+                setShortcutHint(action, 'Alteração cancelada.');
                 return;
             }
 
             const key = keyForShortcut(event);
             if (!key) {
-                setShortcutHint('Complete a combinação com uma tecla que não seja modificadora.', true);
+                setShortcutHint(recordingShortcutAction, 'Complete a combinação com uma tecla que não seja modificadora.', true);
                 return;
             }
             const modifiers = [];
@@ -926,37 +982,39 @@
             if (event.shiftKey) modifiers.push('Shift');
             if (event.metaKey) modifiers.push('Super');
             if (!/^F(?:[1-9]|1\d|2[0-4])$/.test(key) && modifiers.length === 0) {
-                setShortcutHint('Use Ctrl, Alt, Shift ou Windows junto com essa tecla.', true);
+                setShortcutHint(recordingShortcutAction, 'Use Ctrl, Alt, Shift ou Windows junto com essa tecla.', true);
                 return;
             }
 
-            setShortcutRecording(false);
-            await applyCaptureShortcut({ type: 'keyboard', value: [...modifiers, key].join('+') });
+            const action = recordingShortcutAction;
+            setShortcutRecording(null);
+            await applyCaptureShortcut(action, { type: 'keyboard', value: [...modifiers, key].join('+') });
         }, true);
 
         document.addEventListener('mousedown', async event => {
-            if (!isRecordingShortcut) {
+            if (!recordingShortcutAction) {
                 return;
             }
             event.preventDefault();
             event.stopPropagation();
             const mouseButton = { 1: 'MBUTTON', 3: 'XBUTTON1', 4: 'XBUTTON2' }[event.button];
             if (!mouseButton) {
-                setShortcutHint('Use o botão do meio ou um dos botões laterais do mouse.', true);
+                setShortcutHint(recordingShortcutAction, 'Use o botão do meio ou um dos botões laterais do mouse.', true);
                 return;
             }
-            setShortcutRecording(false);
-            await applyCaptureShortcut({ type: 'mouse', value: mouseButton });
+            const action = recordingShortcutAction;
+            setShortcutRecording(null);
+            await applyCaptureShortcut(action, { type: 'mouse', value: mouseButton });
         }, true);
 
         document.addEventListener('contextmenu', event => {
-            if (isRecordingShortcut) {
+            if (recordingShortcutAction) {
                 event.preventDefault();
             }
         });
 
         restoreOcrEngine();
-        restoreCaptureShortcut();
+        restoreCaptureShortcuts();
         saveSettings();
         refreshBridgeStatus();
         desktopApi.settings.getFixedAreaState().then(updateFixedAreaState).catch(() => {});

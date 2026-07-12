@@ -48,7 +48,16 @@ function normalizeCaptureShortcut(type, value) {
     return null;
 }
 
+function hasShortcutConflict(action, shortcut, configuredShortcuts) {
+    return Object.entries(configuredShortcuts).some(([otherAction, configured]) => (
+        otherAction !== action
+        && configured?.type === shortcut?.type
+        && configured?.value === shortcut?.value
+    ));
+}
+
 module.exports = {
     normalizeKeyboardAccelerator,
-    normalizeCaptureShortcut
+    normalizeCaptureShortcut,
+    hasShortcutConflict
 };

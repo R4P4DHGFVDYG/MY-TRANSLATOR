@@ -3,7 +3,7 @@ const { spawn } = require('child_process');
 const { createHash, randomUUID } = require('crypto');
 const path = require('path');
 const { FixedAreaChangeTracker, rectanglesOverlap } = require('./fixed_area');
-const { normalizeCaptureShortcut } = require('./shortcut');
+const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
 
 const APP_NAME = 'G.R.C TRANSLATOR';
 const APP_ICON_PATH = path.join(__dirname, 'assets', 'spider-intro.png');
@@ -26,6 +26,7 @@ const SOURCE_LANGUAGES = new Set(['en']);
 const TARGET_LANGUAGES = new Set(['pt-BR', 'en']);
 const OCR_ENGINES = new Set(['tesseract', 'paddleocr', 'easyocr']);
 const TOAST_POSITIONS = new Set(['custom', 'mouse', 'top', 'bottom', 'center']);
+const SHORTCUT_ACTIONS = new Set(['fixed', 'temporary', 'stop']);
 
 let settingsWindow = null;
 let introWindow = null;
@@ -41,8 +42,9 @@ let toastReady = false;
 let pendingToastPayload = null;
 let isPositioningToast = false;
 let sideMouseHookProcess = null;
-let registeredKeyboardShortcut = null;
+const registeredKeyboardShortcuts = new Map();
 let isStartingSnip = false;
+let snipMode = null;
 let activeTranslation = null;
 let nextTranslationId = 0;
 let fixedCaptureRegion = null;
@@ -66,7 +68,17 @@ const settings = {
     customX: -1,
     customY: -1,
     captureShortcutType: 'keyboard',
-    captureShortcutValue: 'Ctrl+Shift+Q'
+    captureShortcutValue: 'Ctrl+Shift+Q',
+    temporaryShortcutType: 'keyboard',
+    temporaryShortcutValue: 'Ctrl+Shift+W',
+    stopShortcutType: 'keyboard',
+    stopShortcutValue: 'Ctrl+Shift+E'
+};
+
+const shortcutSettingKeys = {
+    fixed: ['captureShortcutType', 'captureShortcutValue'],
+    temporary: ['temporaryShortcutType', 'temporaryShortcutValue'],
+    stop: ['stopShortcutType', 'stopShortcutValue']
 };
 
 function isWindowAlive(window) {
@@ -161,6 +173,21 @@ function stopFixedCapture() {
     publishFixedAreaState();
 }
 
+function stopAreaCapture() {
+    snipMode = null;
+    if (isWindowAlive(snipWindow)) {
+        const currentSnip = snipWindow;
+        snipWindow = null;
+        snipDisplay = null;
+        closeWindow(currentSnip);
+    }
+    stopFixedCapture();
+    cancelActiveTranslation();
+    nextTranslationId += 1;
+    closeToastWindow();
+    publishFixedAreaState();
+}
+
 function getPowerShellPath() {
     const systemRoot = process.env.SystemRoot || 'C:\\Windows';
     return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
@@ -186,11 +213,10 @@ function stopSideMouseShortcut() {
 function startSideMouseShortcut() {
     stopSideMouseShortcut();
 
-    if (
-        process.platform !== 'win32'
-        || settings.captureShortcutType !== 'mouse'
-        || !isMouseShortcutButton(settings.captureShortcutValue)
-    ) {
+    const mouseShortcuts = [...SHORTCUT_ACTIONS]
+        .map(action => ({ action, shortcut: getConfiguredShortcut(action) }))
+        .filter(item => item.shortcut.type === 'mouse' && isMouseShortcutButton(item.shortcut.value));
+    if (process.platform !== 'win32' || mouseShortcuts.length === 0) {
         return;
     }
 
@@ -201,8 +227,8 @@ function startSideMouseShortcut() {
         'Bypass',
         '-File',
         hookPath,
-        '-Button',
-        settings.captureShortcutValue
+        '-Buttons',
+        mouseShortcuts.map(item => item.shortcut.value).join(',')
     ], {
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -220,8 +246,10 @@ function startSideMouseShortcut() {
         hookBuffer = lines.pop() || '';
 
         for (const line of lines) {
-            if (line.trim() === settings.captureShortcutValue) {
-                void startSnip();
+            const pressedButton = line.trim();
+            const match = mouseShortcuts.find(item => item.shortcut.value === pressedButton);
+            if (match) {
+                runShortcutAction(match.action);
             }
         }
     });
@@ -239,46 +267,70 @@ function startSideMouseShortcut() {
     });
 }
 
-function unregisterKeyboardShortcut() {
-    if (registeredKeyboardShortcut) {
-        globalShortcut.unregister(registeredKeyboardShortcut);
-        registeredKeyboardShortcut = null;
+function getConfiguredShortcut(action) {
+    const [typeKey, valueKey] = shortcutSettingKeys[action];
+    return { type: settings[typeKey], value: settings[valueKey] };
+}
+
+function runShortcutAction(action) {
+    if (action === 'fixed') {
+        void startSnip('fixed');
+    } else if (action === 'temporary') {
+        void startSnip('temporary');
+    } else if (action === 'stop') {
+        stopAreaCapture();
     }
 }
 
-function setCaptureShortcut(type, value) {
+function unregisterKeyboardShortcut(action) {
+    const accelerator = registeredKeyboardShortcuts.get(action);
+    if (accelerator) {
+        globalShortcut.unregister(accelerator);
+        registeredKeyboardShortcuts.delete(action);
+    }
+}
+
+function setCaptureShortcut(action, type, value) {
+    if (!SHORTCUT_ACTIONS.has(action)) {
+        return { ok: false, error: 'Ação de atalho inválida.' };
+    }
     const shortcut = normalizeCaptureShortcut(type, value);
     if (!shortcut) {
         return { ok: false, error: 'Atalho inválido.' };
     }
 
+    const configuredShortcuts = Object.fromEntries(
+        [...SHORTCUT_ACTIONS].map(shortcutAction => [shortcutAction, getConfiguredShortcut(shortcutAction)])
+    );
+    const duplicate = hasShortcutConflict(action, shortcut, configuredShortcuts);
+    if (duplicate) {
+        return { ok: false, error: 'Esse atalho já está configurado para outra ação.' };
+    }
+
     if (shortcut.type === 'keyboard') {
-        if (registeredKeyboardShortcut === shortcut.value) {
+        if (registeredKeyboardShortcuts.get(action) === shortcut.value) {
             return { ok: true, shortcut };
         }
         if (globalShortcut.isRegistered(shortcut.value)) {
             return { ok: false, error: 'Esse atalho já está sendo usado por outro aplicativo.' };
         }
         const registered = globalShortcut.register(shortcut.value, () => {
-            void startSnip();
+            runShortcutAction(action);
         });
         if (!registered) {
             return { ok: false, error: 'O Windows não permitiu registrar esse atalho.' };
         }
 
-        unregisterKeyboardShortcut();
-        stopSideMouseShortcut();
-        registeredKeyboardShortcut = shortcut.value;
+        unregisterKeyboardShortcut(action);
+        registeredKeyboardShortcuts.set(action, shortcut.value);
     } else {
-        unregisterKeyboardShortcut();
-        stopSideMouseShortcut();
+        unregisterKeyboardShortcut(action);
     }
 
-    settings.captureShortcutType = shortcut.type;
-    settings.captureShortcutValue = shortcut.value;
-    if (shortcut.type === 'mouse') {
-        startSideMouseShortcut();
-    }
+    const [typeKey, valueKey] = shortcutSettingKeys[action];
+    settings[typeKey] = shortcut.type;
+    settings[valueKey] = shortcut.value;
+    startSideMouseShortcut();
     return { ok: true, shortcut };
 }
 
@@ -581,13 +633,17 @@ function getSourceForDisplay(sources, display) {
     return sources[displayIndex] || sources[0];
 }
 
-async function startSnip() {
+async function startSnip(mode = 'fixed') {
+    if (mode !== 'fixed' && mode !== 'temporary') {
+        return;
+    }
     if (isStartingSnip || isWindowAlive(snipWindow)) {
         return;
     }
 
     stopFixedCapture();
     isStartingSnip = true;
+    snipMode = mode;
     cancelActiveTranslation();
     nextTranslationId += 1;
     closeToastWindow();
@@ -619,12 +675,14 @@ async function startSnip() {
             if (snipWindow === currentSnip) {
                 snipWindow = null;
                 snipDisplay = null;
+                snipMode = null;
                 publishFixedAreaState();
             }
         });
 
         await currentSnip.loadFile(path.join(__dirname, 'snip.html'));
-        if (!isWindowAlive(currentSnip) || snipWindow !== currentSnip) {
+        if (!isWindowAlive(currentSnip) || snipWindow !== currentSnip || snipMode !== mode) {
+            closeWindow(currentSnip);
             return;
         }
 
@@ -637,6 +695,7 @@ async function startSnip() {
         }
         snipWindow = null;
         snipDisplay = null;
+        snipMode = null;
         publishFixedAreaState();
         showToast('Não foi possível abrir o seletor de tela.', captureDisplay.bounds.x, captureDisplay.bounds.y, settings, captureDisplay);
     } finally {
@@ -719,6 +778,26 @@ async function captureSelection(selection, display, options = {}) {
         }));
     }
     return result;
+}
+
+async function translateTemporarySelection(selection, display) {
+    const translationId = ++nextTranslationId;
+    const anchorPoint = {
+        x: display.bounds.x + selection.x,
+        y: display.bounds.y + selection.y
+    };
+
+    try {
+        const captured = await captureSelection(selection, display);
+        if (translationId !== nextTranslationId) {
+            return;
+        }
+        await translateSelection(captured, anchorPoint, display, translationId);
+    } catch (error) {
+        if (translationId === nextTranslationId) {
+            showToast(errorMessageForTranslation(error, false), anchorPoint.x, anchorPoint.y, settings, display);
+        }
+    }
 }
 
 function scheduleFixedCapture(generation, delay = FIXED_CAPTURE_INTERVAL_MS) {
@@ -1082,9 +1161,12 @@ app.whenReady().then(() => {
     }
     createSettingsWindow();
     createIntroWindow();
-    const shortcutResult = setCaptureShortcut(settings.captureShortcutType, settings.captureShortcutValue);
-    if (!shortcutResult.ok) {
-        console.error(`Could not register default capture shortcut: ${shortcutResult.error}`);
+    for (const action of SHORTCUT_ACTIONS) {
+        const shortcut = getConfiguredShortcut(action);
+        const shortcutResult = setCaptureShortcut(action, shortcut.type, shortcut.value);
+        if (!shortcutResult.ok) {
+            console.error(`Could not register default ${action} shortcut: ${shortcutResult.error}`);
+        }
     }
 });
 
@@ -1116,7 +1198,7 @@ ipcMain.handle('set-capture-shortcut', (event, shortcut) => {
     if (!isEventFromWindow(event, settingsWindow) || !isPlainObject(shortcut)) {
         return { ok: false, error: 'Solicitação de atalho inválida.' };
     }
-    return setCaptureShortcut(shortcut.type, shortcut.value);
+    return setCaptureShortcut(shortcut.action, shortcut.type, shortcut.value);
 });
 
 ipcMain.on('intro-complete', event => {
@@ -1138,19 +1220,12 @@ ipcMain.on('toggle-fixed-area', event => {
 
     const state = getFixedAreaState();
     if (state.active || state.selecting) {
-        if (state.selecting && isWindowAlive(snipWindow)) {
-            const currentSnip = snipWindow;
-            snipWindow = null;
-            snipDisplay = null;
-            closeWindow(currentSnip);
-        }
-        stopFixedCapture();
-        publishFixedAreaState();
+        stopAreaCapture();
         return;
     }
 
     settingsWindow.minimize();
-    void startSnip();
+    void startSnip('fixed');
 });
 
 ipcMain.handle('fixed-area-state', event => {
@@ -1175,8 +1250,10 @@ ipcMain.on('snip-complete', (event, payload) => {
 
     const selection = validateSnipPayload(payload);
     const display = snipDisplay || screen.getPrimaryDisplay();
+    const completedMode = snipMode;
     snipWindow = null;
     snipDisplay = null;
+    snipMode = null;
     if (isWindowAlive(currentSnip)) {
         currentSnip.hide();
         currentSnip.destroy();
@@ -1187,7 +1264,12 @@ ipcMain.on('snip-complete', (event, payload) => {
         return;
     }
 
-    startFixedCapture(selection, display);
+    if (completedMode === 'temporary') {
+        publishFixedAreaState();
+        void translateTemporarySelection(selection, display);
+    } else {
+        startFixedCapture(selection, display);
+    }
 });
 
 ipcMain.on('snip-cancel', event => {
@@ -1198,6 +1280,7 @@ ipcMain.on('snip-cancel', event => {
     const currentSnip = snipWindow;
     snipWindow = null;
     snipDisplay = null;
+    snipMode = null;
     closeWindow(currentSnip);
     publishFixedAreaState();
 });

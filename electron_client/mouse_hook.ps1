@@ -1,6 +1,5 @@
 param(
-    [ValidateSet("MBUTTON", "XBUTTON1", "XBUTTON2")]
-    [string]$Button = "XBUTTON1",
+    [string]$Buttons = "XBUTTON1",
     [switch]$NoBlock,
     [switch]$SelfTest
 )
@@ -12,6 +11,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition @"
 using System;
 using System.ComponentModel;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -26,7 +26,7 @@ public static class SideMouseHook
     private static readonly LowLevelMouseProc Proc = HookCallback;
     private static IntPtr hookId = IntPtr.Zero;
 
-    public static string TargetButton = "XBUTTON1";
+    public static readonly HashSet<string> TargetButtons = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     public static bool BlockTarget = true;
     public static event Action<string> ButtonPressed;
 
@@ -82,7 +82,7 @@ public static class SideMouseHook
                 button = xButton == XBUTTON1 ? "XBUTTON1" : xButton == XBUTTON2 ? "XBUTTON2" : "";
             }
 
-            if (!String.IsNullOrEmpty(button) && button == TargetButton)
+            if (!String.IsNullOrEmpty(button) && TargetButtons.Contains(button))
             {
                 Action<string> handler = ButtonPressed;
                 if (handler != null)
@@ -132,7 +132,14 @@ public static class SideMouseHook
 }
 "@
 
-[SideMouseHook]::TargetButton = $Button
+$validButtons = @("MBUTTON", "XBUTTON1", "XBUTTON2")
+$requestedButtons = @($Buttons.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries) | ForEach-Object { $_.Trim().ToUpperInvariant() })
+if ($requestedButtons.Count -eq 0 -or @($requestedButtons | Where-Object { $_ -notin $validButtons }).Count -gt 0) {
+    throw "Unsupported mouse shortcut button."
+}
+foreach ($button in $requestedButtons) {
+    [void][SideMouseHook]::TargetButtons.Add($button)
+}
 [SideMouseHook]::BlockTarget = -not $NoBlock.IsPresent
 
 if ($SelfTest) {

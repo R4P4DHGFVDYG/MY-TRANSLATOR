@@ -14,7 +14,10 @@ contextBridge.exposeInMainWorld('ocrDesktop', {
         update: settings => ipcRenderer.send('update-settings', settings),
         close: () => ipcRenderer.send('close-settings'),
         minimize: () => ipcRenderer.send('minimize-settings'),
-        setCaptureShortcut: shortcut => ipcRenderer.invoke('set-capture-shortcut', shortcut),
+        setCaptureShortcut: (action, shortcut) => ipcRenderer.invoke('set-capture-shortcut', {
+            action,
+            ...shortcut
+        }),
         toggleFixedArea: () => ipcRenderer.send('toggle-fixed-area'),
         getFixedAreaState: () => ipcRenderer.invoke('fixed-area-state'),
         onFixedAreaState: callback => subscribe('fixed-area-state', callback),
