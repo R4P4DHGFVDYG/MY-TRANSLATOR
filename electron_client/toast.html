@@ -100,21 +100,12 @@
             height: 25px;
             display: grid;
             place-items: center;
-        }
-
-        .brand-mark img {
             width: 19px;
             height: 22px;
-            object-fit: contain;
-            filter: drop-shadow(0 0 5px rgba(180, 154, 255, 0.7));
-        }
-
-        .separator {
-            width: 3px;
-            height: 3px;
-            border-radius: 50%;
-            background: currentColor;
-            opacity: 0.5;
+            background: color-mix(in srgb, var(--panel-color, #160d26) 35%, white);
+            -webkit-mask: url("assets/spider-intro.png") center / contain no-repeat;
+            mask: url("assets/spider-intro.png") center / contain no-repeat;
+            opacity: 0.9;
         }
 
         .content-row {
@@ -204,9 +195,7 @@
             </svg>
         </button>
         <div class="toast-header">
-            <span class="brand-mark"><img src="assets/spider-intro.png" alt=""></span>
-            <span>G.R.C Translator</span>
-            <span class="separator"></span>
+            <span class="brand-mark" aria-hidden="true"></span>
             <span id="stateLabel">Tradução</span>
         </div>
         <div class="content-row">
@@ -240,6 +229,7 @@
             stateLabel.textContent = loading ? 'Processando' : 'Tradução';
             toastBox.classList.toggle('loading', loading);
             toastBox.style.color = style.textColor || '#ffffff';
+            toastBox.style.setProperty('--panel-color', style.bgColor || '#160d26');
             toastBox.style.background = hexToRgba(
                 style.bgColor || '#160d26',
                 style.opacity !== undefined ? style.opacity : 0.94
