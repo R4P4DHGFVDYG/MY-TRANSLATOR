@@ -82,6 +82,220 @@ def test_ocr_max_variants_limits_easyocr_work(monkeypatch):
     assert [result.engine for result in results] == ["easyocr:standard"]
 
 
+def test_low_quality_result_tries_a_second_preprocess_variant(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_max_variants=2))
+    calls: list[str] = []
+
+    def fake_easyocr(image):
+        calls.append(image.mode)
+        if image.mode == "RGB":
+            return EngineResult("easyocr", "H3LL0", 0.4, 0.4)
+        return EngineResult("easyocr", "HELLO", 0.95, 0.95)
+
+    monkeypatch.setattr(service, "_run_easyocr", fake_easyocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["easyocr"],
+    )
+
+    assert warnings == []
+    assert calls == ["RGB", "L"]
+    assert [result.engine for result in results] == [
+        "easyocr:standard",
+        "easyocr:contrast",
+    ]
+    assert best is not None
+    assert best.text == "HELLO"
+
+
+def test_adaptive_engine_chain_skips_fallback_for_reliable_primary(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_parallel_engines=False))
+    paddle_calls = 0
+
+    monkeypatch.setattr(
+        service,
+        "_run_tesseract",
+        lambda _image: EngineResult("tesseract", "CLEAR SUBTITLE", 0.95, 0.95),
+    )
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "UNNECESSARY", 0.99, 0.99)
+
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "paddleocr"],
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "CLEAR SUBTITLE"
+    assert paddle_calls == 0
+    assert [result.engine for result in results] == ["tesseract:standard"]
+
+
+def test_adaptive_engine_chain_uses_fallback_for_uncertain_primary(monkeypatch):
+    service = OcrService(
+        BridgeConfig(ocr_parallel_engines=False, ocr_max_variants=1)
+    )
+    paddle_calls = 0
+
+    monkeypatch.setattr(
+        service,
+        "_run_tesseract",
+        lambda _image: EngineResult("tesseract", "H3LL0", 0.4, 0.4),
+    )
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "HELLO", 0.95, 0.95)
+
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "paddleocr"],
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "HELLO"
+    assert paddle_calls == 1
+    assert [result.engine for result in results] == [
+        "tesseract:standard",
+        "paddleocr:standard",
+    ]
+
+
+def test_easyocr_uses_accuracy_focused_decoder_without_png_reencoding(monkeypatch):
+    service = OcrService(BridgeConfig())
+    captured: dict = {}
+
+    class FakeReader:
+        def readtext(self, image, **kwargs):
+            captured["image"] = image
+            captured.update(kwargs)
+            return [([0, 0, 1, 1], "HELLO", 0.9)]
+
+    monkeypatch.setattr(service, "_get_easyocr_reader", lambda: FakeReader())
+
+    result = service._run_easyocr(Image.new("RGB", (80, 30), "white"))
+
+    assert result.text == "HELLO"
+    assert captured["image"].shape == (30, 80, 3)
+    assert captured["decoder"] == "beamsearch"
+    assert captured["beamWidth"] == 5
+    assert captured["mag_ratio"] == 1.5
+
+
+def test_paddleocr_orders_fragments_by_visual_lines(monkeypatch):
+    service = OcrService(BridgeConfig())
+
+    class FakeReader:
+        def predict(self, _image):
+            return [
+                {
+                    "res": {
+                        "rec_texts": ["SECOND", "FIRST", "FOURTH", "THIRD", ""],
+                        "rec_scores": [0.8, 0.9, 0.6, 0.7, 0.99],
+                        "rec_boxes": [
+                            [110, 10, 200, 40],
+                            [10, 12, 100, 42],
+                            [110, 60, 200, 90],
+                            [10, 62, 100, 92],
+                            [0, 0, 5, 5],
+                        ],
+                    }
+                }
+            ]
+
+    monkeypatch.setattr(service, "_get_paddleocr_reader", lambda: FakeReader())
+
+    result = service._run_paddleocr(Image.new("RGB", (240, 120), "white"))
+
+    assert result.text == "FIRST SECOND THIRD FOURTH"
+    assert result.raw_confidence == pytest.approx(0.75)
+
+
+def test_tesseract_uses_sparse_text_fallback_only_for_uncertain_primary(monkeypatch):
+    service = OcrService(BridgeConfig())
+    calls: list[int] = []
+
+    monkeypatch.setattr(service, "_ensure_tesseract_available", lambda: None)
+
+    def fake_pass(_image, psm):
+        calls.append(psm)
+        if psm == 6:
+            return EngineResult("tesseract", "H3LL0", 0.4, 0.4)
+        return EngineResult("tesseract", "HELLO", 0.95, 0.95)
+
+    monkeypatch.setattr(service, "_run_tesseract_psm", fake_pass)
+
+    result = service._run_tesseract(Image.new("RGB", (120, 40), "white"))
+
+    assert calls == [6, 11]
+    assert result.text == "HELLO"
+
+
+def test_tesseract_skips_sparse_fallback_for_strong_primary(monkeypatch):
+    service = OcrService(BridgeConfig())
+    calls: list[int] = []
+
+    monkeypatch.setattr(service, "_ensure_tesseract_available", lambda: None)
+
+    def fake_pass(_image, psm):
+        calls.append(psm)
+        return EngineResult("tesseract", "CLEAR SUBTITLE", 0.96, 0.96)
+
+    monkeypatch.setattr(service, "_run_tesseract_psm", fake_pass)
+
+    service._run_tesseract(Image.new("RGB", (120, 40), "white"))
+
+    assert calls == [6]
+
+
+def test_tesseract_does_not_repeat_empty_page_with_image_to_string(monkeypatch):
+    service = OcrService(BridgeConfig())
+    image_to_string_calls = 0
+
+    class FakePytesseract:
+        @staticmethod
+        def image_to_data(*_args, **_kwargs):
+            return {
+                "text": [],
+                "conf": [],
+                "left": [],
+                "width": [],
+                "height": [],
+            }
+
+        @staticmethod
+        def image_to_string(*_args, **_kwargs):
+            nonlocal image_to_string_calls
+            image_to_string_calls += 1
+            return ""
+
+    import pytesseract
+
+    monkeypatch.setattr(pytesseract, "image_to_data", FakePytesseract.image_to_data)
+    monkeypatch.setattr(
+        pytesseract, "image_to_string", FakePytesseract.image_to_string
+    )
+
+    result = service._run_tesseract_psm(
+        Image.new("RGB", (120, 40), "white"),
+        6,
+    )
+
+    assert result.text == ""
+    assert image_to_string_calls == 0
+
+
 def test_ocr_cache_skips_unchanged_pixels(monkeypatch):
     service = OcrService(BridgeConfig())
     calls = 0

@@ -8,6 +8,7 @@ class FixedAreaChangeTracker {
     reset() {
         this.lastDigest = '';
         this.lastText = '';
+        this.pendingText = '';
     }
 
     updateDigest(digest) {
@@ -20,16 +21,34 @@ class FixedAreaChangeTracker {
     }
 
     updateText(text) {
+        return this.evaluateText(text, 1).display;
+    }
+
+    evaluateText(text, score, confidenceThreshold = 0.72) {
         const normalized = typeof text === 'string' ? text.trim() : '';
         if (!normalized) {
             this.lastText = '';
-            return false;
+            this.pendingText = '';
+            return { display: false, retry: false };
         }
         if (normalized === this.lastText) {
-            return false;
+            return { display: false, retry: false };
         }
-        this.lastText = normalized;
-        return true;
+
+        const numericScore = Number(score);
+        const reliable = Number.isFinite(numericScore) && numericScore >= confidenceThreshold;
+        if (reliable || normalized === this.pendingText) {
+            this.lastText = normalized;
+            this.pendingText = '';
+            return { display: true, retry: false };
+        }
+
+        this.pendingText = normalized;
+        return { display: false, retry: true };
+    }
+
+    retryCurrentFrame() {
+        this.lastDigest = '';
     }
 }
 

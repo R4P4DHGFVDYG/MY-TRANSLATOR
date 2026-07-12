@@ -12,6 +12,8 @@ def test_performance_env_vars_are_loaded(monkeypatch):
     monkeypatch.setenv("HQ_OCR_ENGINE_TIMEOUT_SECONDS", "3")
     monkeypatch.setenv("HQ_OCR_PARALLEL_ENGINES", "1")
     monkeypatch.setenv("HQ_OCR_MAX_VARIANTS", "1")
+    monkeypatch.setenv("HQ_OCR_ACCEPT_SCORE", "0.75")
+    monkeypatch.setenv("HQ_OCR_ACCEPT_CONFIDENCE", "0.7")
     monkeypatch.setenv("HQ_OCR_WARMUP_ON_START", "yes")
     monkeypatch.setenv("HQ_OCR_EASYOCR_GPU", "on")
 
@@ -23,7 +25,10 @@ def test_performance_env_vars_are_loaded(monkeypatch):
     assert config.ocr_engine_timeout_seconds == 3
     assert config.ocr_parallel_engines is True
     assert config.ocr_max_variants == 1
+    assert config.ocr_accept_score == 0.75
+    assert config.ocr_accept_confidence == 0.7
     assert config.ocr_warmup_on_start is True
+    assert config.paddleocr_max_pixels == 1_500_000
     assert config.easyocr_gpu is True
 
 
@@ -45,6 +50,9 @@ def test_config_exposes_safety_limits_and_tesseract_default(
     assert config.paddleocr_recognition_model == "en_PP-OCRv5_mobile_rec"
     assert config.default_ocr_engines == ("tesseract",)
     assert config.allowed_ocr_engines == ("paddleocr", "easyocr", "tesseract")
+    assert config.ocr_max_variants == 2
+    assert config.ocr_accept_score == 0.8
+    assert config.ocr_accept_confidence == 0.78
     assert config.ocr_warmup_on_start is True
 
 
@@ -58,6 +66,10 @@ def test_config_requires_both_named_paddle_models_and_explicit_cors_origins():
         BridgeConfig(cors_allowed_origins=("*",))
     with pytest.raises(ValueError, match="paddleocr_max_pixels"):
         BridgeConfig(paddleocr_max_pixels=0)
+    with pytest.raises(ValueError, match="ocr_accept_score"):
+        BridgeConfig(ocr_accept_score=1.1)
+    with pytest.raises(ValueError, match="ocr_accept_confidence"):
+        BridgeConfig(ocr_accept_confidence=-0.1)
 
 
 def test_config_reserves_request_space_for_base64_and_json_envelope():

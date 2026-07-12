@@ -89,11 +89,36 @@ def test_crop_rejects_non_finite_and_oversized_selections():
         )
 
 
-def test_preprocess_variants_include_standard_soft_and_binary():
+def test_tesseract_preprocess_includes_pixel_and_adaptive_binary_variants():
     image = Image.new("RGB", (120, 40), "white")
 
     variants = preprocess_variants_for_ocr(image)
     names = [name for name, _ in variants]
 
-    assert names == ["standard", "soft", "binary"]
+    assert names == ["standard", "pixel", "binary"]
     assert all(variant.width >= image.width for _, variant in variants)
+
+
+def test_neural_ocr_receives_original_rgb_before_contrast_variants():
+    image = Image.new("RGB", (120, 40), (20, 80, 160))
+
+    variants = preprocess_variants_for_ocr(
+        image,
+        max_variants=2,
+        engine="paddleocr",
+    )
+
+    assert [name for name, _variant in variants] == ["standard", "contrast"]
+    assert variants[0][1] is image
+    assert variants[0][1].mode == "RGB"
+
+
+def test_binary_variant_normalizes_dark_background_to_black_text_on_white():
+    image = Image.new("L", (100, 40), 0)
+    for x in range(30, 70):
+        for y in range(12, 28):
+            image.putpixel((x, y), 255)
+
+    binary = dict(preprocess_variants_for_ocr(image))["binary"]
+
+    assert binary.getpixel((0, 0)) == 255

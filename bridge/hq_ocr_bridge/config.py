@@ -89,7 +89,9 @@ class BridgeConfig:
     ocr_max_concurrent_requests: int = 1
     ocr_max_concurrent_engine_calls: int = 3
     ocr_queue_timeout_seconds: float = 10.0
-    ocr_max_variants: int = 1
+    ocr_max_variants: int = 2
+    ocr_accept_score: float = 0.80
+    ocr_accept_confidence: float = 0.78
     ocr_cache_capacity: int = 128
     ocr_cache_ttl_seconds: float = 600.0
     ocr_warmup_on_start: bool = True
@@ -104,7 +106,7 @@ class BridgeConfig:
     paddleocr_cache_dir: str = ".paddlex-cache"
     paddleocr_model_source: str = "bos"
     paddleocr_enable_mkldnn: bool = False
-    paddleocr_max_pixels: int = 500_000
+    paddleocr_max_pixels: int = 1_500_000
     tesseract_lang: str = "eng"
     max_request_bytes: int = 17 * 1024 * 1024
     max_image_bytes: int = 12 * 1024 * 1024
@@ -173,6 +175,10 @@ class BridgeConfig:
         )
         _require_non_negative("ocr_queue_timeout_seconds", self.ocr_queue_timeout_seconds)
         _require_non_negative_integer("ocr_max_variants", self.ocr_max_variants)
+        _require_unit_interval("ocr_accept_score", self.ocr_accept_score)
+        _require_unit_interval(
+            "ocr_accept_confidence", self.ocr_accept_confidence
+        )
         _require_positive_integer("ocr_cache_capacity", self.ocr_cache_capacity)
         _require_positive("ocr_cache_ttl_seconds", self.ocr_cache_ttl_seconds)
         _require_positive_integer("paddleocr_max_pixels", self.paddleocr_max_pixels)
@@ -256,6 +262,12 @@ class BridgeConfig:
             ),
             ocr_max_variants=_int_from_env(
                 "HQ_OCR_MAX_VARIANTS", cls.ocr_max_variants
+            ),
+            ocr_accept_score=_float_from_env(
+                "HQ_OCR_ACCEPT_SCORE", cls.ocr_accept_score
+            ),
+            ocr_accept_confidence=_float_from_env(
+                "HQ_OCR_ACCEPT_CONFIDENCE", cls.ocr_accept_confidence
             ),
             ocr_cache_capacity=_int_from_env(
                 "HQ_OCR_CACHE_CAPACITY", cls.ocr_cache_capacity
@@ -358,6 +370,12 @@ def _require_non_negative(name: str, value: int | float) -> None:
     _require_finite(name, value)
     if value < 0:
         raise ValueError(f"{name} must not be negative")
+
+
+def _require_unit_interval(name: str, value: int | float) -> None:
+    _require_finite(name, value)
+    if not 0 <= value <= 1:
+        raise ValueError(f"{name} must be between zero and one")
 
 
 def _require_positive_integer(name: str, value: int) -> None:

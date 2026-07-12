@@ -607,11 +607,12 @@
                     <div class="field">
                         <label for="ocrEngine">OCR utilizado</label>
                         <select id="ocrEngine">
-                            <option value="tesseract" selected>Tesseract — Windows</option>
+                            <option value="auto" selected>Automático — recomendado</option>
+                            <option value="tesseract">Tesseract — Windows</option>
                             <option value="paddleocr">PaddleOCR — Inteligência artificial</option>
                             <option value="easyocr">EasyOCR — Alternativo</option>
                         </select>
-                        <div class="field-help" id="ocrEngineHint">Tesseract inicia mais rápido e funciona bem com fontes pixeladas.</div>
+                        <div class="field-help" id="ocrEngineHint">Usa Tesseract primeiro e consulta o PaddleOCR somente quando a leitura estiver incerta.</div>
                     </div>
                 </div>
                     </section>
@@ -777,7 +778,7 @@
 
     <script>
         const desktopApi = window.ocrDesktop;
-        const OCR_STORAGE_KEY = 'grc-translator-ocr-engine';
+        const OCR_STORAGE_KEY = 'grc-translator-ocr-engine-v2';
         const APPEARANCE_STORAGE_KEY = 'grc-translator-appearance';
         const shortcutConfigs = {
             fixed: {
@@ -793,7 +794,7 @@
                 defaultShortcut: { type: 'keyboard', value: 'Ctrl+Shift+E' }
             }
         };
-        const allowedOcrEngines = new Set(['tesseract', 'paddleocr', 'easyocr']);
+        const allowedOcrEngines = new Set(['auto', 'tesseract', 'paddleocr', 'easyocr']);
         const settingIds = [
             'source', 'target', 'ocrEngine', 'position', 'fontFamily', 'fontSize',
             'textAlign', 'textColor', 'bgColor', 'opacity'
@@ -955,6 +956,7 @@
 
         function updateOcrHint(engine) {
             const hints = {
+                auto: 'Usa Tesseract primeiro e consulta o PaddleOCR somente quando a leitura estiver incerta.',
                 tesseract: 'Tesseract inicia mais rápido e funciona bem com fontes pixeladas.',
                 paddleocr: 'PaddleOCR pode reconhecer fontes difíceis, mas o primeiro uso demora mais.',
                 easyocr: 'EasyOCR é uma alternativa mais lenta para comparar resultados.'

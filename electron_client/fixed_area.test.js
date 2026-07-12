@@ -21,6 +21,31 @@ test('fixed area does not display the same recognized text twice', () => {
     assert.equal(tracker.updateText('New subtitle'), true);
 });
 
+test('fixed area confirms a low-confidence OCR result before displaying it', () => {
+    const tracker = new FixedAreaChangeTracker();
+
+    assert.deepEqual(tracker.evaluateText('Possibly wrong', 0.55), {
+        display: false,
+        retry: true
+    });
+    tracker.updateDigest('frame-a');
+    tracker.retryCurrentFrame();
+    assert.equal(tracker.updateDigest('frame-a'), true);
+    assert.deepEqual(tracker.evaluateText('Possibly wrong', 0.55), {
+        display: true,
+        retry: false
+    });
+});
+
+test('fixed area displays a strong OCR result immediately', () => {
+    const tracker = new FixedAreaChangeTracker();
+
+    assert.deepEqual(tracker.evaluateText('Reliable subtitle', 0.9), {
+        display: true,
+        retry: false
+    });
+});
+
 test('overlap detection distinguishes intersecting and separate windows', () => {
     const monitored = { x: 100, y: 100, width: 300, height: 120 };
 

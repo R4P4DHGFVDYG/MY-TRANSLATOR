@@ -370,7 +370,7 @@ def test_debug_capture_writes_crop_and_metadata(tmp_path):
     assert (debug_dir / "crop.png").exists()
     assert (debug_dir / "ocr-preprocessed.png").exists()
     assert (debug_dir / "ocr-preprocessed-standard.png").exists()
-    assert (debug_dir / "ocr-preprocessed-soft.png").exists()
+    assert (debug_dir / "ocr-preprocessed-pixel.png").exists()
     assert (debug_dir / "ocr-preprocessed-binary.png").exists()
     assert (debug_dir / "request.json").exists()
     assert (debug_dir / "response.json").exists()

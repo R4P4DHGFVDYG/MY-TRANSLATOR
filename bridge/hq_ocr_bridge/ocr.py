@@ -3,7 +3,6 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import replace
 import hashlib
-from io import BytesIO
 import importlib.util
 import math
 import os
@@ -72,6 +71,8 @@ class OcrService:
                 "maxConcurrentEngineCalls": self.config.ocr_max_concurrent_engine_calls,
                 "queueTimeoutSeconds": self.config.ocr_queue_timeout_seconds,
                 "maxVariants": self.config.ocr_max_variants,
+                "acceptScore": self.config.ocr_accept_score,
+                "acceptConfidence": self.config.ocr_accept_confidence,
                 "cacheCapacity": self.config.ocr_cache_capacity,
                 "cacheTtlSeconds": self.config.ocr_cache_ttl_seconds,
                 "warmupOnStart": self.config.ocr_warmup_on_start,
@@ -145,21 +146,14 @@ class OcrService:
 
             _raise_if_cancelled(cancel_check)
 
-            variant_limit = (
-                1
-                if all(engine == "paddleocr" for engine in normalized_engines)
-                else self.config.ocr_max_variants
-            )
-            variants = preprocess_variants_for_ocr(
-                image,
-                max_variants=variant_limit,
-            )
             engine_tasks = [
                 (
                     engine,
-                    _paddleocr_variants(variants)
-                    if engine == "paddleocr"
-                    else variants,
+                    preprocess_variants_for_ocr(
+                        image,
+                        max_variants=self.config.ocr_max_variants,
+                        engine=engine,
+                    ),
                 )
                 for engine in normalized_engines
             ]
@@ -180,8 +174,17 @@ class OcrService:
                     )
                     results.extend(engine_results)
                     warnings.extend(engine_warnings)
+                    if self._is_reliable_result(rank_ocr_results(engine_results)):
+                        break
 
-            best = rank_ocr_results(results)
+            best = rank_ocr_results(
+                results,
+                primary_engine=(
+                    normalized_engines[0] if len(normalized_engines) > 1 else None
+                ),
+                accept_score=self.config.ocr_accept_score,
+                accept_confidence=self.config.ocr_accept_confidence,
+            )
             cached_detection = _copy_detection((best, results, warnings))
             self._cache.set(cache_key, cached_detection)
             _raise_if_cancelled(cancel_check)
@@ -324,10 +327,24 @@ class OcrService:
             result.engine = f"{normalized_engine}:{variant_name}"
             result.raw_text = result.text
             result.text = normalize_ocr_text(result.text)
-            result.score = text_quality_score(result.text, result.raw_confidence)
+            result.score = text_quality_score(
+                result.text,
+                result.raw_confidence,
+                raw_text=result.raw_text,
+            )
             results.append(result)
+            if self._is_reliable_result(result):
+                break
+            _raise_if_cancelled(cancel_check)
 
         return results, warnings
+
+    def _is_reliable_result(self, result: EngineResult | None) -> bool:
+        return bool(
+            result
+            and result.score >= self.config.ocr_accept_score
+            and result.raw_confidence >= self.config.ocr_accept_confidence
+        )
 
     def _run_engine_with_timeout(
         self, normalized_engine: str, image: Image.Image
@@ -370,15 +387,20 @@ class OcrService:
         return self._run_tesseract(image)
 
     def _run_easyocr(self, image: Image.Image) -> EngineResult:
+        import numpy as np
+
         reader = self._get_easyocr_reader()
 
-        buffer = BytesIO()
-        image.save(buffer, format="PNG")
         with self._easyocr_lock:
             detections = reader.readtext(
-                buffer.getvalue(),
+                np.asarray(image.convert("RGB")),
                 detail=1,
                 paragraph=False,
+                decoder="beamsearch",
+                beamWidth=5,
+                contrast_ths=0.05,
+                adjust_contrast=0.7,
+                mag_ratio=1.5,
             )
 
         fragments: list[str] = []
@@ -431,14 +453,10 @@ class OcrService:
         confidences: list[float] = []
         for detection in detections:
             payload = _paddleocr_payload(detection)
-            recognized_texts = (
-                str(item).strip() for item in payload.get("rec_texts", [])
-            )
-            fragments.extend(text for text in recognized_texts if text)
-            for confidence in payload.get("rec_scores", []):
-                parsed_confidence = _finite_float(confidence)
-                if parsed_confidence is not None:
-                    confidences.append(parsed_confidence)
+            for text, confidence in _ordered_paddleocr_fragments(payload):
+                fragments.append(text)
+                if confidence is not None:
+                    confidences.append(confidence)
 
         confidence = sum(confidences) / len(confidences) if confidences else 0.0
         return EngineResult("paddleocr", " ".join(fragments), confidence, confidence)
@@ -490,13 +508,36 @@ class OcrService:
     def _run_tesseract(self, image: Image.Image) -> EngineResult:
         self._ensure_tesseract_available()
 
+        primary = self._run_tesseract_psm(image, 6)
+        primary.score = text_quality_score(
+            normalize_ocr_text(primary.text),
+            primary.raw_confidence,
+            raw_text=primary.text,
+        )
+        if self._is_reliable_result(primary):
+            return primary
+
+        sparse = self._run_tesseract_psm(image, 11)
+        sparse.score = text_quality_score(
+            normalize_ocr_text(sparse.text),
+            sparse.raw_confidence,
+            raw_text=sparse.text,
+        )
+        best = rank_ocr_results([primary, sparse])
+        return best or primary
+
+    def _run_tesseract_psm(self, image: Image.Image, psm: int) -> EngineResult:
         import pytesseract
         from pytesseract import Output
+
+        tesseract_config = (
+            f"--oem 1 --psm {psm} -c preserve_interword_spaces=1"
+        )
 
         data = pytesseract.image_to_data(
             image,
             lang=self.config.tesseract_lang,
-            config="--psm 6",
+            config=tesseract_config,
             output_type=Output.DICT,
         )
         recognized = _filtered_tesseract_words(data)
@@ -507,10 +548,14 @@ class OcrService:
             confidence = sum(confidences) / len(confidences) if confidences else 0.0
             return EngineResult("tesseract", " ".join(words), confidence, confidence)
 
+        raw_words = [str(value).strip() for value in data.get("text", [])]
+        if not any(raw_words):
+            return EngineResult("tesseract", "", 0.0, 0.0)
+
         fallback = pytesseract.image_to_string(
             image,
             lang=self.config.tesseract_lang,
-            config="--psm 6",
+            config=tesseract_config,
         )
         return EngineResult("tesseract", fallback, 0.35, 0.35)
 
@@ -637,15 +682,6 @@ def _is_engine_setup_failure(exc: Exception) -> bool:
     )
 
 
-def _paddleocr_variants(
-    variants: list[tuple[str, Image.Image]]
-) -> list[tuple[str, Image.Image]]:
-    for variant in variants:
-        if variant[0] == "standard":
-            return [variant]
-    return variants[:1]
-
-
 def _limit_image_pixels(image: Image.Image, max_pixels: int) -> Image.Image:
     if max_pixels <= 0:
         return image
@@ -682,6 +718,127 @@ def _paddleocr_payload(result: Any) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     return {}
+
+
+def _ordered_paddleocr_fragments(
+    payload: dict[str, Any],
+) -> list[tuple[str, float | None]]:
+    texts = list(payload.get("rec_texts", []))
+    scores = list(payload.get("rec_scores", []))
+    boxes = list(payload.get("rec_boxes", []))
+    polygons = list(payload.get("rec_polys", []))
+    entries: list[dict[str, Any]] = []
+
+    for index, value in enumerate(texts):
+        text = str(value).strip()
+        if not text:
+            continue
+        confidence = _finite_float(scores[index]) if index < len(scores) else None
+        geometry = None
+        if index < len(boxes):
+            geometry = _paddle_bounds(boxes[index])
+        if geometry is None and index < len(polygons):
+            geometry = _paddle_bounds(polygons[index])
+        entries.append(
+            {
+                "text": text,
+                "confidence": confidence,
+                "geometry": geometry,
+                "index": index,
+            }
+        )
+
+    if entries and all(entry["geometry"] is not None for entry in entries):
+        entries = _sort_paddle_entries(entries)
+    return [(entry["text"], entry["confidence"]) for entry in entries]
+
+
+def _paddle_bounds(value: Any) -> tuple[float, float, float, float] | None:
+    try:
+        coordinates = list(value)
+    except TypeError:
+        return None
+
+    if len(coordinates) >= 4 and all(
+        _finite_float(coordinate) is not None for coordinate in coordinates[:4]
+    ):
+        left, top, right, bottom = (
+            float(coordinate) for coordinate in coordinates[:4]
+        )
+    else:
+        points: list[tuple[float, float]] = []
+        for point in coordinates:
+            try:
+                point_values = list(point)
+            except TypeError:
+                continue
+            if len(point_values) < 2:
+                continue
+            x = _finite_float(point_values[0])
+            y = _finite_float(point_values[1])
+            if x is not None and y is not None:
+                points.append((x, y))
+        if not points:
+            return None
+        left = min(point[0] for point in points)
+        top = min(point[1] for point in points)
+        right = max(point[0] for point in points)
+        bottom = max(point[1] for point in points)
+
+    if right <= left or bottom <= top:
+        return None
+    return left, top, right, bottom
+
+
+def _sort_paddle_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    lines: list[list[dict[str, Any]]] = []
+    ordered_by_height = sorted(
+        entries,
+        key=lambda entry: (
+            (entry["geometry"][1] + entry["geometry"][3]) / 2,
+            entry["geometry"][0],
+        ),
+    )
+
+    for entry in ordered_by_height:
+        top = entry["geometry"][1]
+        bottom = entry["geometry"][3]
+        center = (top + bottom) / 2
+        height = bottom - top
+        matching_line = None
+        matching_distance = math.inf
+        for line in lines:
+            centers = [
+                (item["geometry"][1] + item["geometry"][3]) / 2
+                for item in line
+            ]
+            line_center = sum(centers) / len(centers)
+            line_height = max(
+                item["geometry"][3] - item["geometry"][1] for item in line
+            )
+            distance = abs(center - line_center)
+            if (
+                distance <= max(height, line_height) * 0.6
+                and distance < matching_distance
+            ):
+                matching_line = line
+                matching_distance = distance
+        if matching_line is None:
+            lines.append([entry])
+        else:
+            matching_line.append(entry)
+
+    lines.sort(
+        key=lambda line: sum(
+            (item["geometry"][1] + item["geometry"][3]) / 2 for item in line
+        )
+        / len(line)
+    )
+    ordered: list[dict[str, Any]] = []
+    for line in lines:
+        line.sort(key=lambda entry: (entry["geometry"][0], entry["index"]))
+        ordered.extend(line)
+    return ordered
 
 
 def _filtered_tesseract_words(data: dict[str, Any]) -> list[tuple[str, float]]:

@@ -33,8 +33,6 @@ CONTRACTION_FIXES = {
     "COULDNT": "COULDN'T",
     "DIDNT": "DIDN'T",
     "DONT": "DON'T",
-    "ID": "I'D",
-    "ILL": "I'LL",
     "IM": "I'M",
     "ISNT": "ISN'T",
     "IVE": "I'VE",
@@ -63,14 +61,16 @@ def normalize_ocr_text(text: str) -> str:
     return WHITESPACE_RE.sub(" ", normalized).strip()
 
 
-def text_quality_score(text: str, confidence: float) -> float:
+def text_quality_score(
+    text: str, confidence: float, *, raw_text: str | None = None
+) -> float:
     normalized = normalize_ocr_text(text)
     if not normalized:
         return 0.0
 
     chars = list(normalized)
     printable_count = sum(1 for ch in chars if ch in string.printable)
-    alpha_count = sum(1 for ch in chars if ch.isalpha())
+    content_count = sum(1 for ch in chars if ch.isalnum())
     accepted_count = sum(
         1 for ch in chars if ch.isalnum() or ch.isspace() or ch in ".,!?;:'\"-()[]"
     )
@@ -78,7 +78,7 @@ def text_quality_score(text: str, confidence: float) -> float:
 
     printable_ratio = printable_count / len(chars)
     accepted_ratio = accepted_count / len(chars)
-    alpha_ratio = alpha_count / len(chars)
+    content_ratio = content_count / len(chars)
     length_bonus = min(len(normalized) / 80, 1.0)
     word_bonus = min(len(words) / 8, 1.0)
     confidence = _bounded_number(confidence)
@@ -87,7 +87,7 @@ def text_quality_score(text: str, confidence: float) -> float:
         confidence * 0.55
         + printable_ratio * 0.1
         + accepted_ratio * 0.13
-        + alpha_ratio * 0.07
+        + content_ratio * 0.07
         + length_bonus * 0.08
         + word_bonus * 0.07
     )
@@ -98,11 +98,57 @@ def text_quality_score(text: str, confidence: float) -> float:
         score *= 0.55
     if accepted_ratio < 0.65:
         score *= 0.65
+    score *= 1.0 - ocr_suspicion_score(raw_text if raw_text is not None else text)
 
     return round(_clamp(score, 0.0, 1.0), 4)
 
 
-def rank_ocr_results(results: list[EngineResult]) -> EngineResult | None:
+def ocr_suspicion_score(text: str) -> float:
+    printable = "".join(ch if ch.isprintable() else " " for ch in str(text))
+    normalized = WHITESPACE_RE.sub(
+        " ", printable.translate(SMART_PUNCTUATION)
+    ).strip()
+    if not normalized:
+        return 0.0
+
+    tokens = [token.strip(".,!?;:'\"-()[]") for token in normalized.split()]
+    tokens = [token for token in tokens if token]
+    likely_digit_confusions = sum(
+        1 for token in tokens if _looks_like_ocr_digit_confusion(token)
+    )
+    embedded_slashes = sum(
+        len(re.findall(r"(?<=[A-Za-z])[/\\|](?=[A-Za-z])", token))
+        for token in tokens
+        if not token.islower()
+    )
+    unexpected_letters = sum(
+        1 for ch in normalized if ch.isalpha() and ch not in string.ascii_letters
+    )
+    very_long_tokens = sum(1 for token in tokens if len(token) >= 20)
+
+    penalty = min(0.24, likely_digit_confusions * 0.12)
+    penalty += min(0.18, embedded_slashes * 0.12)
+    penalty += min(0.12, unexpected_letters * 0.06)
+    penalty += min(0.08, very_long_tokens * 0.04)
+    return round(_clamp(penalty, 0.0, 0.45), 4)
+
+
+def _looks_like_ocr_digit_confusion(token: str) -> bool:
+    compact = token.replace("-", "")
+    if re.search(r"(?<=[A-Za-z])[13](?=[A-Za-z])", compact):
+        return True
+    if re.fullmatch(r"[017][A-Za-z]{1,3}", compact):
+        return True
+    return re.fullmatch(r"2[IO][A-Za-z]*", compact, flags=re.IGNORECASE) is not None
+
+
+def rank_ocr_results(
+    results: list[EngineResult],
+    *,
+    primary_engine: str | None = None,
+    accept_score: float = 0.8,
+    accept_confidence: float = 0.78,
+) -> EngineResult | None:
     candidates = [result for result in results if normalize_ocr_text(result.text)]
     if not candidates:
         return None
@@ -110,11 +156,16 @@ def rank_ocr_results(results: list[EngineResult]) -> EngineResult | None:
     normalized_texts = {
         id(result): normalize_ocr_text(result.text).lower() for result in candidates
     }
+    adjusted_scores: dict[int, float] = {}
     for result in candidates:
         result.score = _bounded_number(result.score)
         result.raw_confidence = _bounded_number(result.raw_confidence)
+        adjusted_score = result.score
         for other in candidates:
-            if other is result:
+            if (
+                other is result
+                or _base_engine(other.engine) == _base_engine(result.engine)
+            ):
                 continue
             similarity = SequenceMatcher(
                 None,
@@ -122,13 +173,59 @@ def rank_ocr_results(results: list[EngineResult]) -> EngineResult | None:
                 normalized_texts[id(other)],
             ).ratio()
             if similarity >= 0.82:
-                result.score = min(1.0, result.score + 0.08)
+                adjusted_score = min(1.0, adjusted_score + 0.08)
                 break
+        adjusted_scores[id(result)] = adjusted_score
 
-    return max(
+    strongest = max(
         candidates,
-        key=lambda item: (item.score, item.raw_confidence, len(item.text)),
+        key=lambda item: (
+            adjusted_scores[id(item)],
+            item.raw_confidence,
+            len(item.text),
+        ),
     )
+    if not primary_engine:
+        return strongest
+
+    primary_candidates = [
+        result
+        for result in candidates
+        if _base_engine(result.engine) == primary_engine.strip().lower()
+    ]
+    if not primary_candidates:
+        return strongest
+
+    primary = max(
+        primary_candidates,
+        key=lambda item: (
+            adjusted_scores[id(item)],
+            item.raw_confidence,
+            len(item.text),
+        ),
+    )
+    if primary is strongest:
+        return strongest
+
+    primary_is_reliable = (
+        primary.score >= _bounded_number(accept_score)
+        and primary.raw_confidence >= _bounded_number(accept_confidence)
+    )
+    similarity = SequenceMatcher(
+        None,
+        normalized_texts[id(primary)],
+        normalized_texts[id(strongest)],
+    ).ratio()
+    verifier_has_clear_advantage = (
+        adjusted_scores[id(strongest)] - adjusted_scores[id(primary)] >= 0.08
+    )
+    if primary_is_reliable or similarity >= 0.82 or not verifier_has_clear_advantage:
+        return primary
+    return strongest
+
+
+def _base_engine(engine: str) -> str:
+    return str(engine).split(":", 1)[0].strip().lower()
 
 
 def _fix_comic_letter_confusions(text: str) -> str:

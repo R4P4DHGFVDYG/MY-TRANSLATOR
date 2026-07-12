@@ -5,6 +5,7 @@ const path = require('path');
 const { FixedAreaChangeTracker, rectanglesOverlap, toastSizeForFixedArea } = require('./fixed_area');
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
 const { normalizeFontFamily, normalizeFontSize, normalizeTextAlign } = require('./appearance');
+const { OCR_ENGINES, resolveOcrEngines } = require('./ocr_profile');
 
 const APP_NAME = 'G.R.C TRANSLATOR';
 const APP_ICON_PATH = path.join(__dirname, 'assets', 'spider-intro.png');
@@ -25,7 +26,6 @@ const RESULT_CACHE_TTL_MS = 10 * 60 * 1000;
 const CLIENT_ID = randomUUID();
 const SOURCE_LANGUAGES = new Set(['en']);
 const TARGET_LANGUAGES = new Set(['pt-BR', 'en']);
-const OCR_ENGINES = new Set(['tesseract', 'paddleocr', 'easyocr']);
 const TOAST_POSITIONS = new Set(['custom', 'mouse', 'top', 'bottom', 'center']);
 const SHORTCUT_ACTIONS = new Set(['fixed', 'temporary', 'stop']);
 const FALLBACK_SYSTEM_FONTS = ['Segoe UI', 'Arial', 'Calibri', 'Tahoma', 'Verdana', 'Georgia', 'Consolas'];
@@ -63,7 +63,7 @@ app.setName(APP_NAME);
 const settings = {
     sourceLang: 'en',
     targetLang: 'pt-BR',
-    ocrEngine: 'tesseract',
+    ocrEngine: 'auto',
     position: 'custom',
     textColor: '#ffffff',
     bgColor: '#160d26',
@@ -943,7 +943,18 @@ async function runFixedCapture(generation) {
                     closeToastWindow();
                     return false;
                 }
-                return fixedCaptureTracker.updateText(sourceText);
+                const decision = fixedCaptureTracker.evaluateText(
+                    sourceText,
+                    bestOcrScore(payload)
+                );
+                if (decision.retry) {
+                    fixedCaptureTracker.retryCurrentFrame();
+                    console.info('[performance]', JSON.stringify({
+                        stage: 'ocr-confidence-confirmation',
+                        requestId: translationId
+                    }));
+                }
+                return decision.display;
             }
         });
     } catch (error) {
@@ -1138,6 +1149,30 @@ function displayTranslationPayload(payload, anchorPoint, requestSettings, displa
     }
 }
 
+function bestOcrScore(payload) {
+    if (!Array.isArray(payload?.engineResults)) {
+        return 0;
+    }
+    const sourceText = typeof payload.sourceText === 'string'
+        ? payload.sourceText.trim()
+        : '';
+    let bestScore = 0;
+    for (const result of payload.engineResults) {
+        if (!result || typeof result !== 'object') {
+            continue;
+        }
+        const resultText = typeof result.text === 'string' ? result.text.trim() : '';
+        if (sourceText && resultText !== sourceText) {
+            continue;
+        }
+        const score = Number(result.score);
+        if (Number.isFinite(score)) {
+            bestScore = Math.max(bestScore, score);
+        }
+    }
+    return bestScore;
+}
+
 async function translateSelection(selection, anchorPoint, display, translationId, options = {}) {
     if (translationId !== nextTranslationId) {
         return;
@@ -1187,7 +1222,7 @@ async function translateSelection(selection, anchorPoint, display, translationId
                 viewport: { width: selection.width, height: selection.height },
                 source: requestSettings.sourceLang,
                 target: requestSettings.targetLang,
-                engines: [requestSettings.ocrEngine],
+                engines: resolveOcrEngines(requestSettings.ocrEngine),
                 clientId: CLIENT_ID,
                 requestId: translationId
             })

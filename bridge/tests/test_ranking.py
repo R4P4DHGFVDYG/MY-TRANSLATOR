@@ -1,5 +1,10 @@
 from hq_ocr_bridge.models import EngineResult
-from hq_ocr_bridge.ranking import normalize_ocr_text, rank_ocr_results, text_quality_score
+from hq_ocr_bridge.ranking import (
+    normalize_ocr_text,
+    ocr_suspicion_score,
+    rank_ocr_results,
+    text_quality_score,
+)
 
 
 def test_normalize_ocr_text_collapses_spacing():
@@ -64,6 +69,31 @@ def test_normalize_ocr_text_keeps_sentence_case_when_not_all_caps():
     assert normalize_ocr_text(text) == "third lap around and I still can't find it My"
 
 
+def test_normalize_ocr_text_preserves_real_id_and_ill_words():
+    assert normalize_ocr_text("SHOW ME YOUR ID") == "SHOW ME YOUR ID"
+    assert normalize_ocr_text("I FEEL ILL") == "I FEEL ILL"
+
+
+def test_suspicious_ocr_artifacts_reduce_quality_even_with_high_confidence():
+    clean = text_quality_score("THIS IS INTERESTING", 0.98)
+    noisy = text_quality_score(
+        "U1L - THIS /S INTERESTING",
+        0.98,
+        raw_text="U1L - THIS /S INTERESTING",
+    )
+
+    assert ocr_suspicion_score("U1L S/GH") > 0
+    assert noisy < clean
+
+
+def test_quality_does_not_penalize_legitimate_game_codes():
+    legitimate = text_quality_score("H2O AND R2-D2 C-130 and/or", 0.98)
+    letter_substitutions = text_quality_score("HZO AND RZ-DZ C-I3O and/or", 0.98)
+
+    assert ocr_suspicion_score("H2O R2-D2 C-130 and/or") == 0
+    assert legitimate >= letter_substitutions
+
+
 def test_text_quality_penalizes_empty_text():
     assert text_quality_score("", 0.9) == 0.0
 
@@ -75,6 +105,47 @@ def test_rank_prefers_consensus_and_confidence():
     best = rank_ocr_results([weak, strong])
 
     assert best is strong
+
+
+def test_rank_keeps_primary_spelling_when_verifier_is_similar_and_overconfident():
+    primary = EngineResult(
+        "tesseract:standard", "(It's your mom's van.)", 0.73, 0.72
+    )
+    verifier = EngineResult(
+        "paddleocr:standard", "(It's your mom's yan.", 0.95, 0.98
+    )
+
+    best = rank_ocr_results(
+        [primary, verifier],
+        primary_engine="tesseract",
+    )
+
+    assert best is primary
+
+
+def test_rank_uses_verifier_when_uncertain_primary_clearly_disagrees():
+    primary = EngineResult("tesseract:standard", "ZZZ", 0.52, 0.55)
+    verifier = EngineResult(
+        "paddleocr:standard", "CLEAR SUBTITLE", 0.92, 0.94
+    )
+
+    best = rank_ocr_results(
+        [primary, verifier],
+        primary_engine="tesseract",
+    )
+
+    assert best is verifier
+
+
+def test_rank_does_not_treat_same_engine_variants_as_independent_consensus():
+    standard = EngineResult("tesseract:standard", "HELLO WORLD", 0.6, 0.6)
+    binary = EngineResult("tesseract:binary", "HELLO WORLD", 0.65, 0.65)
+
+    best = rank_ocr_results([standard, binary])
+
+    assert best is binary
+    assert standard.score == 0.6
+    assert binary.score == 0.65
 
 
 def test_engine_result_includes_raw_text_when_normalized():
