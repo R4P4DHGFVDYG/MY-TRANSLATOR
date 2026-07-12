@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { FixedAreaChangeTracker, rectanglesOverlap } = require('./fixed_area');
+const { FixedAreaChangeTracker, rectanglesOverlap, toastSizeForFixedArea } = require('./fixed_area');
 
 test('fixed area ignores unchanged images and accepts a later change', () => {
     const tracker = new FixedAreaChangeTracker();
@@ -31,5 +31,37 @@ test('overlap detection distinguishes intersecting and separate windows', () => 
     assert.equal(
         rectanglesOverlap(monitored, { x: 100, y: 240, width: 200, height: 100 }),
         false
+    );
+});
+
+test('translation window follows the active fixed-area size', () => {
+    const display = { id: 7 };
+    const workArea = { width: 1920, height: 1040 };
+    const defaultSize = { width: 600, height: 200 };
+    const region = {
+        displayId: 7,
+        selection: { width: 940, height: 180 }
+    };
+
+    assert.deepEqual(
+        toastSizeForFixedArea(region, display, workArea, defaultSize),
+        { width: 940, height: 180 }
+    );
+    assert.deepEqual(
+        toastSizeForFixedArea(null, display, workArea, defaultSize),
+        defaultSize
+    );
+});
+
+test('translation window is limited to the monitor work area', () => {
+    const display = { id: 2 };
+    const region = {
+        displayId: 2,
+        selection: { width: 3000, height: 1400 }
+    };
+
+    assert.deepEqual(
+        toastSizeForFixedArea(region, display, { width: 1366, height: 728 }, { width: 600, height: 200 }),
+        { width: 1366, height: 728 }
     );
 });

@@ -40,4 +40,16 @@ function rectanglesOverlap(left, right) {
         && left.y + left.height > right.y;
 }
 
-module.exports = { FixedAreaChangeTracker, rectanglesOverlap };
+function toastSizeForFixedArea(region, display, workArea, defaultSize) {
+    const hasMatchingRegion = region
+        && display
+        && region.displayId === display.id
+        && region.selection;
+    const requested = hasMatchingRegion ? region.selection : defaultSize;
+    return {
+        width: Math.max(1, Math.min(workArea.width, Math.floor(requested.width))),
+        height: Math.max(1, Math.min(workArea.height, Math.floor(requested.height)))
+    };
+}
+
+module.exports = { FixedAreaChangeTracker, rectanglesOverlap, toastSizeForFixedArea };

@@ -2,7 +2,7 @@ const { app, BrowserWindow, globalShortcut, ipcMain, desktopCapturer, screen } =
 const { spawn } = require('child_process');
 const { createHash, randomUUID } = require('crypto');
 const path = require('path');
-const { FixedAreaChangeTracker, rectanglesOverlap } = require('./fixed_area');
+const { FixedAreaChangeTracker, rectanglesOverlap, toastSizeForFixedArea } = require('./fixed_area');
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
 const { normalizeFontFamily, normalizeFontSize, normalizeTextAlign } = require('./appearance');
 
@@ -513,9 +513,9 @@ async function getBridgeStatus() {
     }
 }
 
-function clampToastPosition(position, workArea) {
-    const maxX = workArea.x + Math.max(0, workArea.width - TOAST_WIDTH - TOAST_MARGIN);
-    const maxY = workArea.y + Math.max(0, workArea.height - TOAST_HEIGHT - TOAST_MARGIN);
+function clampToastPosition(position, workArea, toastSize) {
+    const maxX = workArea.x + Math.max(0, workArea.width - toastSize.width - TOAST_MARGIN);
+    const maxY = workArea.y + Math.max(0, workArea.height - toastSize.height - TOAST_MARGIN);
 
     return {
         x: Math.min(Math.max(position.x, workArea.x), maxX),
@@ -536,25 +536,25 @@ function fixedAreaBounds(display) {
     };
 }
 
-function positionOutsideFixedArea(position, workArea, display) {
+function positionOutsideFixedArea(position, workArea, display, toastSize) {
     const monitoredArea = fixedAreaBounds(display);
     if (!monitoredArea) {
         return position;
     }
-    const toastArea = { ...position, width: TOAST_WIDTH, height: TOAST_HEIGHT };
+    const toastArea = { ...position, ...toastSize };
     if (!rectanglesOverlap(toastArea, monitoredArea)) {
         return position;
     }
 
     const candidates = [
-        { x: position.x, y: monitoredArea.y - TOAST_HEIGHT - TOAST_MARGIN },
+        { x: position.x, y: monitoredArea.y - toastSize.height - TOAST_MARGIN },
         { x: position.x, y: monitoredArea.y + monitoredArea.height + TOAST_MARGIN },
-        { x: monitoredArea.x - TOAST_WIDTH - TOAST_MARGIN, y: position.y },
+        { x: monitoredArea.x - toastSize.width - TOAST_MARGIN, y: position.y },
         { x: monitoredArea.x + monitoredArea.width + TOAST_MARGIN, y: position.y }
     ];
     for (const candidate of candidates) {
-        const clamped = clampToastPosition(candidate, workArea);
-        const candidateArea = { ...clamped, width: TOAST_WIDTH, height: TOAST_HEIGHT };
+        const clamped = clampToastPosition(candidate, workArea, toastSize);
+        const candidateArea = { ...clamped, ...toastSize };
         if (!rectanglesOverlap(candidateArea, monitoredArea)) {
             return clamped;
         }
@@ -569,14 +569,20 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
     };
     let display = preferredDisplay || screen.getDisplayNearestPoint(anchorPoint);
     let workArea = display.workArea;
+    const toastSize = toastSizeForFixedArea(
+        fixedCaptureRegion,
+        display,
+        workArea,
+        { width: TOAST_WIDTH, height: TOAST_HEIGHT }
+    );
     pendingToastPayload = { text, style: { ...settings } };
 
     let currentToast = toastWindow;
     const wasAlreadyOpen = isWindowAlive(currentToast);
     if (!isWindowAlive(currentToast)) {
         currentToast = new BrowserWindow({
-            width: TOAST_WIDTH,
-            height: TOAST_HEIGHT,
+            width: toastSize.width,
+            height: toastSize.height,
             frame: false,
             transparent: true,
             alwaysOnTop: true,
@@ -624,12 +630,18 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
                 closeWindow(currentToast);
             }
         });
-    } else if (toastReady) {
-        sendToWindow(currentToast, 'set-text', pendingToastPayload);
-        showOverlay(currentToast, true);
+    } else {
+        const [currentWidth, currentHeight] = currentToast.getSize();
+        if (currentWidth !== toastSize.width || currentHeight !== toastSize.height) {
+            currentToast.setSize(toastSize.width, toastSize.height, false);
+        }
+        if (toastReady) {
+            sendToWindow(currentToast, 'set-text', pendingToastPayload);
+            showOverlay(currentToast, true);
+        }
     }
 
-    let posX = Math.floor(workArea.x + (workArea.width - TOAST_WIDTH) / 2);
+    let posX = Math.floor(workArea.x + (workArea.width - toastSize.width) / 2);
     let posY = workArea.y + TOAST_MARGIN;
 
     const livePosition = settings.position;
@@ -644,21 +656,21 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             display = screen.getDisplayNearestPoint({ x: posX, y: posY });
             workArea = display.workArea;
         } else {
-            posY = Math.floor(workArea.y + (workArea.height - TOAST_HEIGHT) / 2);
+            posY = Math.floor(workArea.y + (workArea.height - toastSize.height) / 2);
         }
     } else if (livePosition === 'bottom') {
-        posY = workArea.y + workArea.height - TOAST_HEIGHT - TOAST_MARGIN;
+        posY = workArea.y + workArea.height - toastSize.height - TOAST_MARGIN;
     } else if (livePosition === 'center') {
-        posY = Math.floor(workArea.y + (workArea.height - TOAST_HEIGHT) / 2);
+        posY = Math.floor(workArea.y + (workArea.height - toastSize.height) / 2);
     } else if (livePosition === 'mouse') {
         posX = anchorPoint.x + 10;
         posY = anchorPoint.y + 10;
     }
 
-    const clampedPosition = clampToastPosition({ x: posX, y: posY }, workArea);
+    const clampedPosition = clampToastPosition({ x: posX, y: posY }, workArea, toastSize);
     const finalPosition = livePosition === 'custom'
         ? clampedPosition
-        : positionOutsideFixedArea(clampedPosition, workArea, display);
+        : positionOutsideFixedArea(clampedPosition, workArea, display, toastSize);
 
     const targetX = Math.round(finalPosition.x);
     const targetY = Math.round(finalPosition.y);
