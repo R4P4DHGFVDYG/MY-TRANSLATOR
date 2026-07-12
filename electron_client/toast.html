@@ -9,7 +9,6 @@
         :root {
             color-scheme: dark;
             --accent: #b49aff;
-            --accent-soft: rgba(180, 154, 255, 0.2);
             --text: #ffffff;
         }
 
@@ -47,7 +46,6 @@
             border-radius: 0;
             color: var(--text);
             background: rgba(22, 13, 38, 0.94);
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.58), inset 0 1px 0 rgba(255, 255, 255, 0.08);
             backdrop-filter: blur(22px);
             -webkit-backdrop-filter: blur(22px);
             cursor: grab;
@@ -60,21 +58,7 @@
             position: absolute;
             inset: 0 auto 0 0;
             width: 3px;
-            background: linear-gradient(to bottom, transparent, var(--panel-highlight, #b49aff), transparent);
-            box-shadow: 0 0 18px var(--panel-highlight, #b49aff);
-        }
-
-        .toast-shell::after {
-            content: "";
-            position: absolute;
-            width: 220px;
-            height: 110px;
-            top: -72px;
-            left: 60px;
-            border-radius: 50%;
-            pointer-events: none;
-            background: var(--accent-soft);
-            filter: blur(38px);
+            background: var(--panel-highlight, #b49aff);
         }
 
         .toast-shell:active {
