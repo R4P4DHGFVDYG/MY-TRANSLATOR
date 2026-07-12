@@ -521,6 +521,7 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
     pendingToastPayload = { text, style: currentSettings };
 
     let currentToast = toastWindow;
+    const wasAlreadyOpen = isWindowAlive(currentToast);
     if (!isWindowAlive(currentToast)) {
         currentToast = new BrowserWindow({
             width: TOAST_WIDTH,
@@ -533,6 +534,7 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             show: false,
             webPreferences: getWebPreferences()
         });
+        currentToast.setContentProtection(true);
         toastWindow = currentToast;
         toastReady = false;
 
@@ -579,37 +581,46 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
     let posX = Math.floor(workArea.x + (workArea.width - TOAST_WIDTH) / 2);
     let posY = workArea.y + TOAST_MARGIN;
 
-    if (currentSettings.position === 'custom') {
-        if (currentSettings.customX !== -1 && currentSettings.customY !== -1) {
-            posX = currentSettings.customX;
-            posY = currentSettings.customY;
+    const livePosition = settings.position;
+    if (livePosition === 'custom') {
+        if (wasAlreadyOpen) {
+            [posX, posY] = currentToast.getPosition();
+            display = screen.getDisplayNearestPoint({ x: posX, y: posY });
+            workArea = display.workArea;
+        } else if (settings.customX !== -1 && settings.customY !== -1) {
+            posX = settings.customX;
+            posY = settings.customY;
             display = screen.getDisplayNearestPoint({ x: posX, y: posY });
             workArea = display.workArea;
         } else {
             posY = Math.floor(workArea.y + (workArea.height - TOAST_HEIGHT) / 2);
         }
-    } else if (currentSettings.position === 'bottom') {
+    } else if (livePosition === 'bottom') {
         posY = workArea.y + workArea.height - TOAST_HEIGHT - TOAST_MARGIN;
-    } else if (currentSettings.position === 'center') {
+    } else if (livePosition === 'center') {
         posY = Math.floor(workArea.y + (workArea.height - TOAST_HEIGHT) / 2);
-    } else if (currentSettings.position === 'mouse') {
+    } else if (livePosition === 'mouse') {
         posX = anchorPoint.x + 10;
         posY = anchorPoint.y + 10;
     }
 
-    const clampedPosition = positionOutsideFixedArea(
-        clampToastPosition({ x: posX, y: posY }, workArea),
-        workArea,
-        display
-    );
+    const clampedPosition = clampToastPosition({ x: posX, y: posY }, workArea);
+    const finalPosition = livePosition === 'custom'
+        ? clampedPosition
+        : positionOutsideFixedArea(clampedPosition, workArea, display);
 
-    isPositioningToast = true;
-    currentToast.setPosition(Math.round(clampedPosition.x), Math.round(clampedPosition.y));
-    setTimeout(() => {
-        if (toastWindow === currentToast) {
-            isPositioningToast = false;
-        }
-    }, 50);
+    const targetX = Math.round(finalPosition.x);
+    const targetY = Math.round(finalPosition.y);
+    const [currentX, currentY] = currentToast.getPosition();
+    if (currentX !== targetX || currentY !== targetY) {
+        isPositioningToast = true;
+        currentToast.setPosition(targetX, targetY);
+        setTimeout(() => {
+            if (toastWindow === currentToast) {
+                isPositioningToast = false;
+            }
+        }, 50);
+    }
 
     if (toastCloseTimer) {
         clearTimeout(toastCloseTimer);
@@ -840,29 +851,9 @@ async function runFixedCapture(generation) {
     };
 
     try {
-        let hiddenToast = null;
-        const monitoredArea = fixedAreaBounds(display);
-        if (
-            monitoredArea
-            && isWindowAlive(toastWindow)
-            && toastWindow.isVisible()
-            && rectanglesOverlap(toastWindow.getBounds(), monitoredArea)
-        ) {
-            hiddenToast = toastWindow;
-            hiddenToast.hide();
-            await wait(50);
-        }
-
-        let captured;
-        try {
-            captured = await captureSelection(region.selection, display, {
-                logPerformance: false
-            });
-        } finally {
-            if (isWindowAlive(hiddenToast)) {
-                showOverlay(hiddenToast, true);
-            }
-        }
+        const captured = await captureSelection(region.selection, display, {
+            logPerformance: false
+        });
         if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
             return;
         }
