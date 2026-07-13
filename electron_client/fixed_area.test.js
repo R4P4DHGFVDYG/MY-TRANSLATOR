@@ -3,11 +3,41 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+    AdaptiveCaptureCadence,
     FixedAreaChangeTracker,
+    createPerceptualSignature,
+    perceptualFrameDifference,
     rectanglesOverlap,
     temporalTextSimilarity,
     toastSizeForFixedArea
 } = require('./fixed_area');
+
+test('adaptive cadence counts processing time instead of adding another full delay', () => {
+    const cadence = new AdaptiveCaptureCadence({
+        activeIntervalMs: 240,
+        idleIntervalMs: 400,
+        quietFrameThreshold: 3
+    });
+
+    assert.equal(cadence.delayAfter(90), 150);
+    assert.equal(cadence.delayAfter(300), 0);
+    assert.equal(cadence.delayAfter(10, true), 0);
+});
+
+test('adaptive cadence slows down only after consecutive unchanged frames', () => {
+    const cadence = new AdaptiveCaptureCadence({
+        activeIntervalMs: 240,
+        idleIntervalMs: 400,
+        quietFrameThreshold: 2
+    });
+
+    cadence.noteUnchanged();
+    assert.equal(cadence.currentInterval(), 240);
+    cadence.noteUnchanged();
+    assert.equal(cadence.currentInterval(), 400);
+    cadence.noteChanged();
+    assert.equal(cadence.currentInterval(), 240);
+});
 
 test('fixed area ignores unchanged images and accepts a later change', () => {
     const tracker = new FixedAreaChangeTracker();
@@ -15,6 +45,42 @@ test('fixed area ignores unchanged images and accepts a later change', () => {
     assert.equal(tracker.updateDigest('frame-a'), true);
     assert.equal(tracker.updateDigest('frame-a'), false);
     assert.equal(tracker.updateDigest('frame-b'), true);
+});
+
+test('perceptual frame tracking ignores isolated animation noise', () => {
+    const tracker = new FixedAreaChangeTracker();
+    const baseline = new Uint8Array(576);
+    const minorNoise = baseline.slice();
+    minorNoise[10] = 255;
+    const subtitleChange = baseline.slice();
+    subtitleChange.fill(255, 0, 10);
+
+    assert.equal(tracker.updateFrameSignature(baseline), true);
+    assert.equal(tracker.updateFrameSignature(minorNoise), false);
+    assert.equal(tracker.lastFrameDifference < 0.003, true);
+    assert.equal(tracker.updateFrameSignature(subtitleChange), true);
+    assert.equal(tracker.lastFrameDifference >= 0.003, true);
+});
+
+test('temporal retry forces OCR even when the perceptual frame is unchanged', () => {
+    const tracker = new FixedAreaChangeTracker();
+    const signature = new Uint8Array([10, 20, 30, 40]);
+
+    assert.equal(tracker.updateFrameSignature(signature), true);
+    assert.equal(tracker.updateFrameSignature(signature), false);
+    tracker.retryCurrentFrame();
+    assert.equal(tracker.updateFrameSignature(signature), true);
+});
+
+test('bitmap signature converts BGRA pixels to compact luminance samples', () => {
+    const bitmap = new Uint8Array([
+        0, 0, 0, 255,
+        255, 255, 255, 255
+    ]);
+    const signature = createPerceptualSignature(bitmap);
+
+    assert.deepEqual([...signature], [0, 255]);
+    assert.equal(perceptualFrameDifference(signature, signature), 0);
 });
 
 test('fixed area does not display the same recognized text twice', () => {

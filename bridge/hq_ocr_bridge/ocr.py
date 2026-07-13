@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from dataclasses import replace
+from difflib import SequenceMatcher
 import hashlib
 import importlib.util
 import math
@@ -30,6 +31,9 @@ from .windows_ocr import WindowsOcrAdapter, windows_ocr_health
 DEFAULT_ENGINES = ["tesseract"]
 AUTOMATIC_PROFILE_ENGINES = ("tesseract", "windowsocr", "paddleocr")
 AUTOMATIC_FAST_ENGINES = ("tesseract", "windowsocr")
+AUTOMATIC_NEAR_CONSENSUS_MIN_LENGTH = 20
+AUTOMATIC_NEAR_CONSENSUS_SIMILARITY = 0.96
+AUTOMATIC_NEAR_CONSENSUS_WINDOWS_SCORE = 0.60
 SUPPORTED_ENGINES = frozenset(
     {"windowsocr", "easyocr", "paddleocr", "tesseract"}
 )
@@ -383,22 +387,75 @@ class OcrService:
             if {_base_engine(result.engine) for result in cluster}
             >= set(AUTOMATIC_FAST_ENGINES)
         ]
-        if not consensus:
+        for cluster in consensus:
+            consensus_text = normalize_ocr_text(cluster[0].text)
+            if len(consensus_text) < 2 or not any(
+                ch.isalnum() for ch in consensus_text
+            ):
+                continue
+            if not any(
+                ocr_suspicion_score(result.raw_text or result.text) > 0
+                for result in cluster
+            ):
+                return True
+
+        tesseract_results = [
+            result
+            for result in results
+            if _base_engine(result.engine) == "tesseract"
+            and normalize_ocr_text(result.text)
+        ]
+        windows_results = [
+            result
+            for result in results
+            if _base_engine(result.engine) == "windowsocr"
+            and normalize_ocr_text(result.text)
+        ]
+        return any(
+            self._automatic_fast_pair_is_conclusive(tesseract, windows)
+            for tesseract in tesseract_results
+            for windows in windows_results
+        )
+
+    def _automatic_fast_pair_is_conclusive(
+        self,
+        tesseract: EngineResult,
+        windows: EngineResult,
+    ) -> bool:
+        if (
+            not self._is_reliable_result(tesseract)
+            or windows.score < AUTOMATIC_NEAR_CONSENSUS_WINDOWS_SCORE
+        ):
+            return False
+        if any(
+            ocr_suspicion_score(result.raw_text or result.text) > 0
+            for result in (tesseract, windows)
+        ):
             return False
 
-        strongest_cluster = max(
-            consensus,
-            key=lambda cluster: (
-                max(result.score for result in cluster),
-                len(cluster[0].text),
-            ),
-        )
-        consensus_text = normalize_ocr_text(strongest_cluster[0].text)
-        if len(consensus_text) < 2 or not any(ch.isalnum() for ch in consensus_text):
+        tesseract_text = _automatic_consensus_key(tesseract.text)
+        windows_text = _automatic_consensus_key(windows.text)
+        if not tesseract_text or not windows_text:
             return False
-        return not any(
-            ocr_suspicion_score(result.raw_text or result.text) > 0
-            for result in strongest_cluster
+        if tesseract_text == windows_text:
+            return len(tesseract_text) >= 4
+        if min(len(tesseract_text), len(windows_text)) < (
+            AUTOMATIC_NEAR_CONSENSUS_MIN_LENGTH
+        ):
+            return False
+        if len(tesseract_text.split()) != len(windows_text.split()):
+            return False
+        if abs(len(tesseract_text) - len(windows_text)) > 1:
+            return False
+
+        similarity = SequenceMatcher(
+            None,
+            tesseract_text,
+            windows_text,
+        ).ratio()
+        return (
+            similarity >= AUTOMATIC_NEAR_CONSENSUS_SIMILARITY
+            and _has_single_safe_consensus_edit(tesseract_text, windows_text)
         )
 
     def _acquire_request_slot(
@@ -986,6 +1043,39 @@ def _automatic_engine_has_terminal_failure(
         ):
             return True
     return False
+
+
+def _automatic_consensus_key(text: str) -> str:
+    normalized = normalize_ocr_text(text).casefold()
+    characters = [
+        character
+        for character in normalized
+        if character.isalnum() or character.isspace()
+    ]
+    return " ".join("".join(characters).split())
+
+
+def _has_single_safe_consensus_edit(left: str, right: str) -> bool:
+    changed_characters = ""
+    edit_cost = 0
+    matcher = SequenceMatcher(
+        None,
+        left,
+        right,
+    )
+    for operation, left_start, left_end, right_start, right_end in matcher.get_opcodes():
+        if operation == "equal":
+            continue
+        edit_cost += max(left_end - left_start, right_end - right_start)
+        changed_characters += left[left_start:left_end] + right[right_start:right_end]
+        if edit_cost > 1:
+            return False
+
+    return (
+        edit_cost == 1
+        and bool(changed_characters)
+        and all(character.isalpha() for character in changed_characters)
+    )
 
 
 def _limit_image_pixels(image: Image.Image, max_pixels: int) -> Image.Image:

@@ -1,5 +1,60 @@
 'use strict';
 
+// Calibrated on real typewriter-style subtitles: small enough to catch added
+// letters while still ignoring isolated pixel noise and identical frames.
+const DEFAULT_FRAME_DIFFERENCE_THRESHOLD = 0.003;
+
+class AdaptiveCaptureCadence {
+    constructor(options = {}) {
+        this.activeIntervalMs = positiveNumber(options.activeIntervalMs, 240);
+        this.idleIntervalMs = Math.max(
+            this.activeIntervalMs,
+            positiveNumber(options.idleIntervalMs, 400)
+        );
+        this.quietFrameThreshold = Math.max(
+            1,
+            Math.floor(positiveNumber(options.quietFrameThreshold, 5))
+        );
+        this.reset();
+    }
+
+    reset() {
+        this.quietFrames = 0;
+    }
+
+    noteChanged() {
+        this.quietFrames = 0;
+    }
+
+    noteUnchanged() {
+        this.quietFrames = Math.min(
+            this.quietFrameThreshold,
+            this.quietFrames + 1
+        );
+    }
+
+    noteError() {
+        this.quietFrames = this.quietFrameThreshold;
+    }
+
+    currentInterval() {
+        return this.quietFrames >= this.quietFrameThreshold
+            ? this.idleIntervalMs
+            : this.activeIntervalMs;
+    }
+
+    delayAfter(elapsedMs, immediate = false) {
+        if (immediate) {
+            return 0;
+        }
+        const elapsed = Number(elapsedMs);
+        const normalizedElapsed = Number.isFinite(elapsed) && elapsed > 0
+            ? elapsed
+            : 0;
+        return Math.max(0, Math.round(this.currentInterval() - normalizedElapsed));
+    }
+}
+
 class FixedAreaChangeTracker {
     constructor() {
         this.reset();
@@ -11,6 +66,9 @@ class FixedAreaChangeTracker {
         this.lastTextKey = '';
         this.pendingText = '';
         this.pendingTextKey = '';
+        this.lastFrameSignature = null;
+        this.lastFrameDifference = 1;
+        this.forceNextFrame = false;
     }
 
     updateDigest(digest) {
@@ -24,6 +82,47 @@ class FixedAreaChangeTracker {
 
     updateText(text) {
         return this.evaluateText(text, 1).display;
+    }
+
+    updateFrameSignature(
+        signature,
+        differenceThreshold = DEFAULT_FRAME_DIFFERENCE_THRESHOLD
+    ) {
+        const normalized = normalizedSignature(signature);
+        if (!normalized) {
+            this.lastFrameDifference = 1;
+            return true;
+        }
+
+        if (this.forceNextFrame) {
+            this.forceNextFrame = false;
+            this.lastFrameDifference = this.lastFrameSignature
+                ? perceptualFrameDifference(this.lastFrameSignature, normalized)
+                : 1;
+            this.lastFrameSignature = normalized;
+            return true;
+        }
+        if (!this.lastFrameSignature) {
+            this.lastFrameSignature = normalized;
+            this.lastFrameDifference = 1;
+            return true;
+        }
+
+        const difference = perceptualFrameDifference(
+            this.lastFrameSignature,
+            normalized
+        );
+        this.lastFrameDifference = difference;
+        const numericThreshold = Number(differenceThreshold);
+        const threshold = Number.isFinite(numericThreshold)
+            ? Math.max(0, Math.min(1, numericThreshold))
+            : DEFAULT_FRAME_DIFFERENCE_THRESHOLD;
+        if (difference < threshold) {
+            return false;
+        }
+
+        this.lastFrameSignature = normalized;
+        return true;
     }
 
     evaluateText(
@@ -75,7 +174,59 @@ class FixedAreaChangeTracker {
 
     retryCurrentFrame() {
         this.lastDigest = '';
+        this.forceNextFrame = true;
     }
+}
+
+function createPerceptualSignature(bitmap) {
+    if (!(bitmap instanceof Uint8Array) || bitmap.length < 4) {
+        return new Uint8Array();
+    }
+
+    const pixelCount = Math.floor(bitmap.length / 4);
+    const signature = new Uint8Array(pixelCount);
+    for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+        const offset = pixel * 4;
+        const blue = bitmap[offset];
+        const green = bitmap[offset + 1];
+        const red = bitmap[offset + 2];
+        signature[pixel] = Math.round((red * 77 + green * 150 + blue * 29) / 256);
+    }
+    return signature;
+}
+
+function perceptualFrameDifference(left, right) {
+    const first = normalizedSignature(left);
+    const second = normalizedSignature(right);
+    if (!first || !second || first.length !== second.length) {
+        return 1;
+    }
+
+    let absoluteDifference = 0;
+    let substantiallyChanged = 0;
+    for (let index = 0; index < first.length; index += 1) {
+        const difference = Math.abs(first[index] - second[index]);
+        absoluteDifference += difference;
+        if (difference >= 24) {
+            substantiallyChanged += 1;
+        }
+    }
+
+    const meanDifference = absoluteDifference / (first.length * 255);
+    const changedPixelRatio = substantiallyChanged / first.length;
+    return Math.max(meanDifference, changedPixelRatio * 0.45);
+}
+
+function normalizedSignature(value) {
+    if (!(value instanceof Uint8Array) || value.length === 0) {
+        return null;
+    }
+    return Uint8Array.from(value);
+}
+
+function positiveNumber(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 function normalizeTemporalText(text) {
@@ -157,8 +308,11 @@ function toastSizeForFixedArea(region, display, workArea, defaultSize) {
 }
 
 module.exports = {
+    AdaptiveCaptureCadence,
     FixedAreaChangeTracker,
+    createPerceptualSignature,
     normalizeTemporalText,
+    perceptualFrameDifference,
     rectanglesOverlap,
     temporalTextSimilarity,
     toastSizeForFixedArea

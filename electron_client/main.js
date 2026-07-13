@@ -2,7 +2,13 @@ const { app, BrowserWindow, globalShortcut, ipcMain, desktopCapturer, screen } =
 const { spawn } = require('child_process');
 const { createHash, randomUUID } = require('crypto');
 const path = require('path');
-const { FixedAreaChangeTracker, rectanglesOverlap, toastSizeForFixedArea } = require('./fixed_area');
+const {
+    AdaptiveCaptureCadence,
+    FixedAreaChangeTracker,
+    createPerceptualSignature,
+    rectanglesOverlap,
+    toastSizeForFixedArea
+} = require('./fixed_area');
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
 const { normalizeFontFamily, normalizeFontSize, normalizeTextAlign } = require('./appearance');
 const { OCR_ENGINES, resolveOcrEngines } = require('./ocr_profile');
@@ -20,7 +26,11 @@ const BRIDGE_DEFAULT_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const BRIDGE_DEFAULT_MAX_CROP_PIXELS = 12_000_000;
 const MAX_SNIP_PIXELS = BRIDGE_DEFAULT_MAX_CROP_PIXELS;
 const CAPTURE_SETTLE_MS = 16;
-const FIXED_CAPTURE_INTERVAL_MS = 650;
+const FIXED_CAPTURE_ACTIVE_INTERVAL_MS = 240;
+const FIXED_CAPTURE_IDLE_INTERVAL_MS = 400;
+const FIXED_CAPTURE_QUIET_FRAME_THRESHOLD = 5;
+const PERCEPTUAL_SAMPLE_WIDTH = 32;
+const PERCEPTUAL_SAMPLE_HEIGHT = 18;
 const INTRO_FALLBACK_MS = 5000;
 const RESULT_CACHE_CAPACITY = 64;
 const RESULT_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -63,6 +73,11 @@ let fixedCaptureLastError = '';
 let systemFontsCache = null;
 const resultCache = new Map();
 const fixedCaptureTracker = new FixedAreaChangeTracker();
+const fixedCaptureCadence = new AdaptiveCaptureCadence({
+    activeIntervalMs: FIXED_CAPTURE_ACTIVE_INTERVAL_MS,
+    idleIntervalMs: FIXED_CAPTURE_IDLE_INTERVAL_MS,
+    quietFrameThreshold: FIXED_CAPTURE_QUIET_FRAME_THRESHOLD
+});
 
 app.setName(APP_NAME);
 
@@ -177,6 +192,7 @@ function stopFixedCapture() {
     fixedCaptureRegion = null;
     fixedCaptureRunning = false;
     fixedCaptureTracker.reset();
+    fixedCaptureCadence.reset();
     fixedCaptureLastError = '';
     if (hadFixedCapture) {
         cancelActiveTranslation();
@@ -827,8 +843,43 @@ async function captureSelection(selection, display, options = {}) {
         height: bottom - top
     });
     const cropMs = performance.now() - cropStartedAt;
+
+    let frameSignature = null;
+    let signatureMs = 0;
+    if (options.deferEncoding === true) {
+        const signatureStartedAt = performance.now();
+        const signatureImage = croppedImage.resize({
+            width: PERCEPTUAL_SAMPLE_WIDTH,
+            height: PERCEPTUAL_SAMPLE_HEIGHT,
+            quality: 'good'
+        });
+        frameSignature = createPerceptualSignature(signatureImage.toBitmap());
+        signatureMs = performance.now() - signatureStartedAt;
+    }
+    const capturedFrame = {
+        croppedImage,
+        frameSignature,
+        width: right - left,
+        height: bottom - top,
+        startedAt: totalStartedAt,
+        performance: {
+            captureMs: Number(captureMs.toFixed(2)),
+            cropMs: Number(cropMs.toFixed(2)),
+            ...(options.deferEncoding === true
+                ? { signatureMs: Number(signatureMs.toFixed(2)) }
+                : {}),
+            cropPixels: (right - left) * (bottom - top)
+        }
+    };
+    if (options.deferEncoding === true) {
+        return capturedFrame;
+    }
+    return encodeCapturedSelection(capturedFrame, options);
+}
+
+function encodeCapturedSelection(capturedFrame, options = {}) {
     const encodeStartedAt = performance.now();
-    const png = croppedImage.toPNG();
+    const png = capturedFrame.croppedImage.toPNG();
     const encodeMs = performance.now() - encodeStartedAt;
     if (png.length > BRIDGE_DEFAULT_MAX_IMAGE_BYTES) {
         throw new Error('The selected image is too large.');
@@ -836,14 +887,12 @@ async function captureSelection(selection, display, options = {}) {
     const result = {
         base64: `data:image/png;base64,${png.toString('base64')}`,
         digest: createHash('sha256').update(png).digest('hex'),
-        width: right - left,
-        height: bottom - top,
+        width: capturedFrame.width,
+        height: capturedFrame.height,
         performance: {
-            captureMs: Number(captureMs.toFixed(2)),
-            cropMs: Number(cropMs.toFixed(2)),
+            ...capturedFrame.performance,
             encodeMs: Number(encodeMs.toFixed(2)),
-            totalMs: Number((performance.now() - totalStartedAt).toFixed(2)),
-            cropPixels: (right - left) * (bottom - top),
+            totalMs: Number((performance.now() - capturedFrame.startedAt).toFixed(2)),
             encodedBytes: png.length
         }
     };
@@ -877,7 +926,10 @@ async function translateTemporarySelection(selection, display) {
     }
 }
 
-function scheduleFixedCapture(generation, delay = FIXED_CAPTURE_INTERVAL_MS) {
+function scheduleFixedCapture(
+    generation,
+    delay = fixedCaptureCadence.currentInterval()
+) {
     if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
         return;
     }
@@ -908,6 +960,8 @@ async function runFixedCapture(generation) {
     }
 
     fixedCaptureRunning = true;
+    const cycleStartedAt = performance.now();
+    let immediateRetry = false;
     const region = fixedCaptureRegion;
     const display = screen.getAllDisplays().find(item => item.id === region.displayId)
         || screen.getPrimaryDisplay();
@@ -917,19 +971,27 @@ async function runFixedCapture(generation) {
     };
 
     try {
-        const captured = await captureSelection(region.selection, display, {
+        const capturedFrame = await captureSelection(region.selection, display, {
+            deferEncoding: true,
             logPerformance: false
         });
         if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
             return;
         }
-        if (!fixedCaptureTracker.updateDigest(captured.digest)) {
+        if (!fixedCaptureTracker.updateFrameSignature(capturedFrame.frameSignature)) {
+            fixedCaptureCadence.noteUnchanged();
             return;
         }
+        fixedCaptureCadence.noteChanged();
+        const captured = encodeCapturedSelection(capturedFrame, {
+            logPerformance: false
+        });
 
         fixedCaptureLastError = '';
         console.info('[performance]', JSON.stringify({
             stage: 'fixed-capture-change',
+            frameDifference: Number(fixedCaptureTracker.lastFrameDifference.toFixed(4)),
+            captureIntervalMs: fixedCaptureCadence.currentInterval(),
             ...captured.performance
         }));
         const translationId = ++nextTranslationId;
@@ -952,6 +1014,7 @@ async function runFixedCapture(generation) {
                 );
                 if (decision.retry) {
                     fixedCaptureTracker.retryCurrentFrame();
+                    immediateRetry = true;
                     console.info('[performance]', JSON.stringify({
                         stage: 'ocr-temporal-confirmation',
                         requestId: translationId
@@ -961,6 +1024,7 @@ async function runFixedCapture(generation) {
             }
         });
     } catch (error) {
+        fixedCaptureCadence.noteError();
         if (generation === fixedCaptureGeneration && fixedCaptureRegion) {
             const message = errorMessageForTranslation(error, false);
             if (message !== fixedCaptureLastError) {
@@ -970,7 +1034,11 @@ async function runFixedCapture(generation) {
         }
     } finally {
         fixedCaptureRunning = false;
-        scheduleFixedCapture(generation);
+        const cycleElapsedMs = performance.now() - cycleStartedAt;
+        scheduleFixedCapture(
+            generation,
+            fixedCaptureCadence.delayAfter(cycleElapsedMs, immediateRetry)
+        );
     }
 }
 
