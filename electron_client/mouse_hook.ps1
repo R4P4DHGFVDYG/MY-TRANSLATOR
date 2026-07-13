@@ -1,5 +1,6 @@
 param(
     [string]$Buttons = "XBUTTON1",
+    [int]$ParentProcessId = 0,
     [switch]$NoBlock,
     [switch]$SelfTest
 )
@@ -153,12 +154,40 @@ $handler = [System.Action[string]]{
     [Console]::Out.Flush()
 }
 
+$parentTimer = $null
 [SideMouseHook]::add_ButtonPressed($handler)
 
 try {
     [SideMouseHook]::Start()
+    if ($ParentProcessId -gt 0) {
+        try {
+            [void][System.Diagnostics.Process]::GetProcessById($ParentProcessId)
+        }
+        catch {
+            throw "Parent process is not running."
+        }
+
+        $parentTimer = New-Object System.Windows.Forms.Timer
+        $parentTimer.Interval = 1000
+        $parentTimer.add_Tick({
+            try {
+                $parent = [System.Diagnostics.Process]::GetProcessById($ParentProcessId)
+                if ($parent.HasExited) {
+                    [System.Windows.Forms.Application]::ExitThread()
+                }
+            }
+            catch {
+                [System.Windows.Forms.Application]::ExitThread()
+            }
+        })
+        $parentTimer.Start()
+    }
     [System.Windows.Forms.Application]::Run()
 }
 finally {
+    if ($null -ne $parentTimer) {
+        $parentTimer.Stop()
+        $parentTimer.Dispose()
+    }
     [SideMouseHook]::Stop()
 }

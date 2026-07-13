@@ -896,8 +896,13 @@
             }
         }
 
-        function loadLanguageOptions() {
-            const languages = desktopApi.settings.getLanguages();
+        async function loadLanguageOptions() {
+            let languages;
+            try {
+                languages = await desktopApi.settings.getLanguages();
+            } catch {
+                return;
+            }
             if (!Array.isArray(languages) || languages.length === 0) {
                 return;
             }
@@ -1152,7 +1157,7 @@
         });
 
         async function initializeSettings() {
-            loadLanguageOptions();
+            await loadLanguageOptions();
             restoreOcrEngine();
             await loadSystemFonts();
             restoreAppearanceSettings();

@@ -11,7 +11,7 @@ const {
 } = require('./fixed_area');
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
 const { normalizeFontFamily, normalizeFontSize, normalizeTextAlign } = require('./appearance');
-const { LANGUAGE_CODES } = require('./language_catalog');
+const { LANGUAGE_CODES, languageOptions } = require('./language_catalog');
 const {
     OCR_ENGINES,
     resolveOcrEngines,
@@ -85,6 +85,10 @@ const fixedCaptureCadence = new AdaptiveCaptureCadence({
 });
 
 app.setName(APP_NAME);
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+    app.quit();
+}
 
 const settings = {
     sourceLang: 'en',
@@ -138,8 +142,16 @@ function getWebPreferences() {
         preload: path.join(__dirname, 'preload.js'),
         nodeIntegration: false,
         contextIsolation: true,
+        sandbox: true,
         webSecurity: true
     };
+}
+
+function hardenWindow(window) {
+    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    window.webContents.on('will-navigate', event => {
+        event.preventDefault();
+    });
 }
 
 function configureFullscreenOverlay(window) {
@@ -306,7 +318,9 @@ function startSideMouseShortcut() {
         '-File',
         hookPath,
         '-Buttons',
-        mouseShortcuts.map(item => item.shortcut.value).join(',')
+        mouseShortcuts.map(item => item.shortcut.value).join(','),
+        '-ParentProcessId',
+        String(process.pid)
     ], {
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -425,6 +439,7 @@ function createSettingsWindow() {
         show: false,
         webPreferences: getWebPreferences()
     });
+    hardenWindow(settingsWindow);
     settingsWindow.center();
 
     settingsWindow.on('closed', () => {
@@ -498,6 +513,7 @@ function createIntroWindow() {
         enableLargerThanScreen: true,
         webPreferences: getWebPreferences()
     });
+    hardenWindow(currentIntro);
     introWindow = currentIntro;
     currentIntro.setIgnoreMouseEvents(true);
     currentIntro.on('closed', () => {
@@ -615,6 +631,7 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             show: false,
             webPreferences: getWebPreferences()
         });
+        hardenWindow(currentToast);
         currentToast.setContentProtection(true);
         toastWindow = currentToast;
         toastReady = false;
@@ -765,6 +782,7 @@ async function startSnip(mode = 'fixed') {
             show: false,
             webPreferences: getWebPreferences()
         });
+        hardenWindow(currentSnip);
         configureFullscreenOverlay(currentSnip);
 
         snipWindow = currentSnip;
@@ -1339,6 +1357,9 @@ async function translateSelection(selection, anchorPoint, display, translationId
 }
 
 app.whenReady().then(() => {
+    if (!hasSingleInstanceLock) {
+        return;
+    }
     if (process.platform === 'win32') {
         app.setAppUserModelId('com.grc.translator');
     }
@@ -1354,6 +1375,12 @@ app.whenReady().then(() => {
         if (!shortcutResult.ok) {
             console.error(`Could not register default ${action} shortcut: ${shortcutResult.error}`);
         }
+    }
+});
+
+app.on('second-instance', () => {
+    if (isWindowAlive(settingsWindow)) {
+        showSettingsWindow(true);
     }
 });
 
@@ -1428,6 +1455,13 @@ ipcMain.handle('bridge-status', event => {
         return { state: 'offline', label: 'Status indisponível' };
     }
     return getBridgeStatus();
+});
+
+ipcMain.handle('languages', event => {
+    if (!isEventFromWindow(event, settingsWindow)) {
+        return [];
+    }
+    return languageOptions();
 });
 
 ipcMain.handle('system-fonts', event => {
