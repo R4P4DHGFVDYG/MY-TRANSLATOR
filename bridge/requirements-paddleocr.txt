@@ -1,3 +1,6 @@
 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
 paddlepaddle==3.3.0
 paddleocr>=3.6,<4
+aiohttp>=3.14.1,<4
+protobuf>=6.33.5,<7
+ujson>=5.13,<6

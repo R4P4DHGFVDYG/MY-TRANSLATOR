@@ -48,6 +48,12 @@ cd .\electron_client
 npm ci
 ```
 
+PaddleOCR e EasyOCR são opcionais. Para habilitá-los também, execute na pasta do projeto:
+
+```powershell
+.\bridge\.venv\Scripts\python.exe -m pip install -r .\bridge\requirements-paddleocr.txt -r .\bridge\requirements-ocr.txt
+```
+
 ## Como iniciar
 
 Abra um PowerShell na pasta `electron_client`:
