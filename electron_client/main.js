@@ -950,7 +950,7 @@ async function runFixedCapture(generation) {
                 if (decision.retry) {
                     fixedCaptureTracker.retryCurrentFrame();
                     console.info('[performance]', JSON.stringify({
-                        stage: 'ocr-confidence-confirmation',
+                        stage: 'ocr-temporal-confirmation',
                         requestId: translationId
                     }));
                 }

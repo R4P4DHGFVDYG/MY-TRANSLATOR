@@ -2,7 +2,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { FixedAreaChangeTracker, rectanglesOverlap, toastSizeForFixedArea } = require('./fixed_area');
+const {
+    FixedAreaChangeTracker,
+    rectanglesOverlap,
+    temporalTextSimilarity,
+    toastSizeForFixedArea
+} = require('./fixed_area');
 
 test('fixed area ignores unchanged images and accepts a later change', () => {
     const tracker = new FixedAreaChangeTracker();
@@ -44,6 +49,56 @@ test('fixed area displays a strong OCR result immediately', () => {
         display: true,
         retry: false
     });
+});
+
+test('fixed area accepts similar low-confidence readings as temporal consensus', () => {
+    const tracker = new FixedAreaChangeTracker();
+
+    assert.deepEqual(tracker.evaluateText('So what, dumbass? Follow her.', 0.55), {
+        display: false,
+        retry: true
+    });
+    assert.deepEqual(tracker.evaluateText('S0 what, dumbass? Follow her.', 0.58), {
+        display: true,
+        retry: false
+    });
+});
+
+test('fixed area requires consecutive consensus for unrelated weak readings', () => {
+    const tracker = new FixedAreaChangeTracker();
+
+    assert.deepEqual(tracker.evaluateText('First uncertain subtitle', 0.5), {
+        display: false,
+        retry: true
+    });
+    assert.deepEqual(tracker.evaluateText('Completely different reading', 0.5), {
+        display: false,
+        retry: true
+    });
+    assert.deepEqual(tracker.evaluateText('First uncertain subtitle', 0.5), {
+        display: false,
+        retry: true
+    });
+});
+
+test('fixed area clears a pending candidate when the displayed text returns', () => {
+    const tracker = new FixedAreaChangeTracker();
+
+    tracker.evaluateText('Current subtitle', 0.9);
+    tracker.evaluateText('Possible next subtitle', 0.5);
+    assert.deepEqual(tracker.evaluateText('CURRENT SUBTITLE!', 0.5), {
+        display: false,
+        retry: false
+    });
+    assert.deepEqual(tracker.evaluateText('Possible next subtitle', 0.5), {
+        display: false,
+        retry: true
+    });
+});
+
+test('temporal similarity tolerates isolated OCR substitutions', () => {
+    assert.ok(temporalTextSimilarity('subtitle text here', 'subtit1e text here') >= 0.86);
+    assert.ok(temporalTextSimilarity('subtitle text here', 'different sentence') < 0.86);
 });
 
 test('overlap detection distinguishes intersecting and separate windows', () => {
