@@ -175,6 +175,42 @@ def test_automatic_profile_runs_fast_engines_in_parallel_and_skips_paddle_on_con
     }
 
 
+def test_automatic_profile_stops_after_first_variant_when_fast_engines_agree(
+    monkeypatch,
+):
+    service = OcrService(
+        BridgeConfig(ocr_max_variants=2, ocr_max_parallel_engines=2)
+    )
+    calls = {"tesseract": 0, "windowsocr": 0, "paddleocr": 0}
+
+    def fake_tesseract(_image):
+        calls["tesseract"] += 1
+        return EngineResult("tesseract", "HELLO WORLD", 0.91, 0.91)
+
+    def fake_windowsocr(_image, _language=None):
+        calls["windowsocr"] += 1
+        return EngineResult("windowsocr", "HELLO WORLD", 0.0, None)
+
+    def fake_paddleocr(_image):
+        calls["paddleocr"] += 1
+        return EngineResult("paddleocr", "SHOULD NOT RUN", 0.99, 0.99)
+
+    monkeypatch.setattr(service, "_run_tesseract", fake_tesseract)
+    monkeypatch.setattr(service, "_run_windowsocr", fake_windowsocr)
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "windowsocr", "paddleocr"],
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "HELLO WORLD"
+    assert calls == {"tesseract": 1, "windowsocr": 1, "paddleocr": 0}
+    assert len(results) == 2
+
+
 def test_automatic_profile_uses_paddle_when_fast_engines_disagree(monkeypatch):
     service = OcrService(BridgeConfig(ocr_max_variants=1))
     paddle_calls = 0

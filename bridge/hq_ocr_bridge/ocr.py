@@ -310,26 +310,47 @@ class OcrService:
         cancel_check: Callable[[], bool] | None,
         language_tag: str | None,
     ) -> tuple[list[EngineResult], list[str]]:
-        fast_tasks = [
-            (
-                engine,
-                preprocess_variants_for_ocr(
-                    image,
-                    max_variants=self.config.ocr_max_variants,
-                    engine=engine,
-                ),
+        fast_variants = {
+            engine: preprocess_variants_for_ocr(
+                image,
+                max_variants=self.config.ocr_max_variants,
+                engine=engine,
             )
             for engine in AUTOMATIC_FAST_ENGINES
-        ]
-        results, warnings = self._detect_engines_parallel(
-            fast_tasks,
-            cancel_check,
-            language_tag,
+        }
+        results: list[EngineResult] = []
+        warnings: list[str] = []
+        stopped_engines: set[str] = set()
+        rounds = max(
+            (len(variants) for variants in fast_variants.values()),
+            default=0,
         )
-        _raise_if_cancelled(cancel_check)
 
-        if self._automatic_fast_result_is_conclusive(results):
-            return results, warnings
+        for variant_index in range(rounds):
+            round_tasks = [
+                (engine, [variants[variant_index]])
+                for engine, variants in fast_variants.items()
+                if engine not in stopped_engines and variant_index < len(variants)
+            ]
+            if not round_tasks:
+                break
+
+            round_results, round_warnings = self._detect_engines_parallel(
+                round_tasks,
+                cancel_check,
+                language_tag,
+            )
+            results.extend(round_results)
+            warnings.extend(round_warnings)
+            stopped_engines.update(
+                engine
+                for engine, _variants in round_tasks
+                if _automatic_engine_has_terminal_failure(engine, round_results)
+            )
+            _raise_if_cancelled(cancel_check)
+
+            if self._automatic_fast_result_is_conclusive(results):
+                return results, warnings
 
         paddle_variants = preprocess_variants_for_ocr(
             image,
@@ -951,6 +972,20 @@ def _is_engine_setup_failure(exc: Exception) -> bool:
         or "no module named" in message
         or "worker crashed" in message
     )
+
+
+def _automatic_engine_has_terminal_failure(
+    engine: str, results: list[EngineResult]
+) -> bool:
+    for result in results:
+        if _base_engine(result.engine) != engine or not result.warning:
+            continue
+        warning = result.warning.lower()
+        if "timed out on" in warning or _is_engine_setup_failure(
+            RuntimeError(warning)
+        ):
+            return True
+    return False
 
 
 def _limit_image_pixels(image: Image.Image, max_pixels: int) -> Image.Image:
