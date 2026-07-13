@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>G.R.C TRANSLATOR</title>
     <link rel="icon" href="assets/spider-intro.png" type="image/png">
@@ -572,7 +573,7 @@
                 <div>
                     <div class="eyebrow">
                         <span class="status-dot warming" id="statusDot"></span>
-                        <span id="statusLabel">Verificando o bridge</span>
+                        <span id="statusLabel" role="status" aria-live="polite">Verificando o bridge</span>
                     </div>
                     <h1>Tradutor desenvolvido para desktop, com foco em jogos.</h1>
                     <p>Defina uma área da tela e traduza automaticamente todas as legendas que aparecerem nela.
@@ -614,7 +615,7 @@
                             <option value="paddleocr">PaddleOCR — Inteligência artificial</option>
                             <option value="easyocr">EasyOCR — Alternativo</option>
                         </select>
-                        <div class="field-help" id="ocrEngineHint">Usa Tesseract primeiro e consulta Windows OCR e PaddleOCR somente quando a leitura estiver incerta.</div>
+                        <div class="field-help" id="ocrEngineHint">Compara Tesseract e Windows OCR em paralelo e consulta PaddleOCR quando a leitura estiver incerta.</div>
                     </div>
                 </div>
                     </section>
@@ -773,7 +774,7 @@
 
             <footer class="footer">
                 <span>G.R.C Translator · v1.0</span>
-                <span class="footer-chip">Processamento local</span>
+                <span class="footer-chip">OCR local · tradução online</span>
             </footer>
         </main>
     </div>
@@ -1000,7 +1001,7 @@
 
         function updateOcrHint(engine) {
             const hints = {
-                auto: 'Usa Tesseract primeiro e consulta Windows OCR e PaddleOCR somente quando a leitura estiver incerta.',
+                auto: 'Compara Tesseract e Windows OCR em paralelo e consulta PaddleOCR quando a leitura estiver incerta.',
                 auto8bit: 'Força o tratamento para fontes pixeladas, compara Tesseract e Windows OCR e usa PaddleOCR quando houver dúvida.',
                 windowsocr: 'Windows OCR é nativo, rápido e usa o pacote de idioma instalado no sistema.',
                 tesseract: 'Tesseract é uma opção local leve e rápida para fontes comuns.',

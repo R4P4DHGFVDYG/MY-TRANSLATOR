@@ -600,6 +600,39 @@ def test_debug_capture_writes_crop_and_metadata(tmp_path):
     }
 
 
+def test_debug_capture_limit_preserves_existing_captures(tmp_path):
+    existing = tmp_path / "existing-capture"
+    existing.mkdir()
+    marker = existing / "keep.txt"
+    marker.write_text("preserve", encoding="utf-8")
+    app = create_app(
+        BridgeConfig(
+            debug_capture_dir=str(tmp_path),
+            debug_capture_max_count=1,
+            allow_request_debug_captures=True,
+        ),
+        ocr_service=FakeOcrService(),
+        translator=FakeTranslator(),
+    )
+
+    response = app.test_client().post(
+        "/v1/translate-selection",
+        json={
+            "imageDataUrl": _png_data_url(),
+            "selection": {"x": 0, "y": 0, "width": 20, "height": 20},
+            "viewport": {"width": 20, "height": 20},
+            "debug": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert "debugCapture" not in payload
+    assert "debug capture limit reached (1)" in payload["warnings"]
+    assert marker.read_text(encoding="utf-8") == "preserve"
+    assert [item.name for item in tmp_path.iterdir()] == ["existing-capture"]
+
+
 def test_debug_capture_saves_the_isolated_text_region(tmp_path):
     app = create_app(
         BridgeConfig(

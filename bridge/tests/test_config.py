@@ -76,6 +76,7 @@ def test_config_exposes_safety_limits_and_tesseract_default(
         "windowsocr",
         "paddleocr",
     )
+    assert config.debug_capture_max_count == 5_000
 
 
 def test_config_requires_both_named_paddle_models_and_explicit_cors_origins():
@@ -96,6 +97,25 @@ def test_config_requires_both_named_paddle_models_and_explicit_cors_origins():
         BridgeConfig(windows_ocr_lang=" ")
     with pytest.raises(ValueError, match="ocr_warmup_engines"):
         BridgeConfig(ocr_warmup_engines=("imaginary",))
+    with pytest.raises(ValueError, match="local computer"):
+        BridgeConfig(host="0.0.0.0")
+    with pytest.raises(ValueError, match="unsupported providers"):
+        BridgeConfig(translation_providers=("imaginary",))
+    with pytest.raises(ValueError, match="debug_capture_dir"):
+        BridgeConfig(debug_capture_dir=" ")
+    with pytest.raises(ValueError, match="debug_capture_max_count"):
+        BridgeConfig(debug_capture_max_count=0)
+
+
+def test_invalid_environment_values_fail_fast(monkeypatch):
+    monkeypatch.setenv("HQ_OCR_SAVE_DEBUG_CAPTURES", "maybe")
+    with pytest.raises(ValueError, match="must be a boolean"):
+        BridgeConfig.from_env()
+
+    monkeypatch.delenv("HQ_OCR_SAVE_DEBUG_CAPTURES")
+    monkeypatch.setenv("HQ_OCR_BRIDGE_PORT", "not-a-port")
+    with pytest.raises(ValueError, match="must be an integer"):
+        BridgeConfig.from_env()
 
 
 def test_warmup_engines_are_limited_to_allowed_engines():

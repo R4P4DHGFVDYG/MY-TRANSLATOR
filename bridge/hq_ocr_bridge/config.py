@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import math
 import os
 
@@ -14,7 +15,12 @@ def _bool_from_env(name: str, default: bool) -> bool:
     if value is None:
         return default
 
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
 
 
 def _int_from_env(name: str, default: int) -> int:
@@ -24,8 +30,8 @@ def _int_from_env(name: str, default: int) -> int:
 
     try:
         return int(value)
-    except ValueError:
-        return default
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
 
 
 def _float_from_env(name: str, default: float) -> float:
@@ -35,10 +41,12 @@ def _float_from_env(name: str, default: float) -> float:
 
     try:
         parsed = float(value)
-    except ValueError:
-        return default
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
 
-    return parsed if math.isfinite(parsed) else default
+    if not math.isfinite(parsed):
+        raise ValueError(f"{name} must be finite")
+    return parsed
 
 
 def _csv_from_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -127,6 +135,7 @@ class BridgeConfig:
     save_debug_captures: bool = False
     allow_request_debug_captures: bool = False
     debug_capture_dir: str = "debug-captures"
+    debug_capture_max_count: int = 5_000
     log_performance: bool = True
 
     def __post_init__(self) -> None:
@@ -170,12 +179,32 @@ class BridgeConfig:
             engine for engine in configured_warmup_engines if engine in allowed_engines
         ) or default_engines
 
+        if not self.easyocr_lang.strip():
+            raise ValueError("easyocr_lang must not be empty")
         if not self.paddleocr_lang.strip():
             raise ValueError("paddleocr_lang must not be empty")
         if not self.paddleocr_ocr_version.strip():
             raise ValueError("paddleocr_ocr_version must not be empty")
         if not self.windows_ocr_lang.strip():
             raise ValueError("windows_ocr_lang must not be empty")
+        if not self.tesseract_lang.strip():
+            raise ValueError("tesseract_lang must not be empty")
+        if not self.paddleocr_cache_dir.strip():
+            raise ValueError("paddleocr_cache_dir must not be empty")
+        if not self.debug_capture_dir.strip():
+            raise ValueError("debug_capture_dir must not be empty")
+        if not _is_loopback_host(self.host):
+            raise ValueError("host must resolve to the local computer")
+
+        allowed_providers = {"deepl", "google", "libretranslate"}
+        unknown_providers = set(self.translation_providers) - allowed_providers
+        if unknown_providers:
+            raise ValueError(
+                "translation_providers contains unsupported providers: "
+                + ", ".join(sorted(unknown_providers))
+            )
+        if not self.translation_providers:
+            raise ValueError("translation_providers must not be empty")
 
         detection_model = _normalized_optional(self.paddleocr_detection_model)
         recognition_model = _normalized_optional(self.paddleocr_recognition_model)
@@ -220,6 +249,9 @@ class BridgeConfig:
         _require_positive_integer("max_image_bytes", self.max_image_bytes)
         _require_positive_integer("max_image_pixels", self.max_image_pixels)
         _require_positive_integer("max_crop_pixels", self.max_crop_pixels)
+        _require_positive_integer(
+            "debug_capture_max_count", self.debug_capture_max_count
+        )
         required_request_bytes = _minimum_request_bytes_for_image(
             self.max_image_bytes
         )
@@ -235,6 +267,9 @@ class BridgeConfig:
         object.__setattr__(self, "paddleocr_detection_model", detection_model)
         object.__setattr__(self, "paddleocr_recognition_model", recognition_model)
         object.__setattr__(self, "cors_allowed_origins", origins)
+        object.__setattr__(self, "host", self.host.strip())
+        object.__setattr__(self, "paddleocr_cache_dir", self.paddleocr_cache_dir.strip())
+        object.__setattr__(self, "debug_capture_dir", self.debug_capture_dir.strip())
 
     @classmethod
     def from_env(cls) -> "BridgeConfig":
@@ -374,6 +409,10 @@ class BridgeConfig:
             debug_capture_dir=os.getenv(
                 "HQ_OCR_DEBUG_CAPTURE_DIR", cls.debug_capture_dir
             ),
+            debug_capture_max_count=_int_from_env(
+                "HQ_OCR_DEBUG_CAPTURE_MAX_COUNT",
+                cls.debug_capture_max_count,
+            ),
             log_performance=_bool_from_env(
                 "HQ_OCR_LOG_PERFORMANCE", cls.log_performance
             ),
@@ -394,6 +433,16 @@ def _normalized_optional(value: str | None) -> str | None:
         return None
     normalized = str(value).strip()
     return normalized or None
+
+
+def _is_loopback_host(value: str) -> bool:
+    normalized = str(value).strip().lower().strip("[]")
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def _minimum_request_bytes_for_image(image_bytes: int) -> int:

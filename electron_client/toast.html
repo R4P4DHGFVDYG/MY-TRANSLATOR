@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>G.R.C TRANSLATOR</title>
     <link rel="icon" href="assets/spider-intro.png" type="image/png">
@@ -185,7 +186,7 @@
         </div>
         <div class="content-row">
             <span class="spinner" aria-hidden="true"></span>
-            <div id="content">Carregando...</div>
+            <div id="content" role="status" aria-live="polite">Carregando...</div>
         </div>
     </div>
 

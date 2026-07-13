@@ -10,7 +10,11 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from .config import BridgeConfig
-from .debug_capture import DebugCapture, debug_capture_requested
+from .debug_capture import (
+    DebugCapture,
+    DebugCaptureLimitReached,
+    debug_capture_requested,
+)
 from .image_utils import (
     ImagePayloadTooLarge,
     crop_visible_selection,
@@ -82,6 +86,7 @@ def create_app(
                 "debug": {
                     "saveCaptures": bridge_config.save_debug_captures,
                     "requestCapturesAllowed": bridge_config.allow_request_debug_captures,
+                    "maxCaptureCount": bridge_config.debug_capture_max_count,
                 },
             }
         )
@@ -155,6 +160,9 @@ def create_app(
             debug_started_at = perf_counter()
             try:
                 debug_capture = DebugCapture(bridge_config, payload, crop, crop_meta)
+            except DebugCaptureLimitReached as exc:
+                debug_capture = None
+                debug_warning = str(exc)
             except Exception:
                 debug_capture = None
                 debug_warning = "debug capture could not be saved"

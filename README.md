@@ -27,7 +27,7 @@ O G.R.C Translator foi criado principalmente para traduzir legendas de jogos. Vo
 - Python 3.10 ou mais recente;
 - Node.js LTS;
 - conexão com a internet;
-- Tesseract OCR, usado primeiro pelo modo automático;
+- Tesseract OCR e Windows OCR, comparados em paralelo pelo modo automático;
 - pacote de idioma OCR do Windows para usar o mecanismo nativo opcional.
 
 ## Instalação
@@ -36,8 +36,8 @@ Abra o PowerShell e execute:
 
 ```powershell
 cd "$env:USERPROFILE\Documents"
-git clone https://github.com/R4P4DHGFVDYG/G-R-C-TRANSLATOR-.git
-cd G-R-C-TRANSLATOR-
+git clone https://github.com/R4P4DHGFVDYG/MY-TRANSLATOR.git
+cd MY-TRANSLATOR
 
 python -m venv .\bridge\.venv
 .\bridge\.venv\Scripts\python.exe -m pip install --upgrade pip
@@ -74,6 +74,8 @@ Para melhor compatibilidade, use o jogo em **janela sem bordas**. Alguns jogos e
 
 ## Observações
 
-- O OCR funciona no computador, mas a tradução precisa de internet.
+- O OCR funciona no computador, mas o texto reconhecido é enviado ao provedor de tradução escolhido e precisa de internet.
+- O Windows OCR acompanha o idioma escolhido; Tesseract, EasyOCR e PaddleOCR dependem dos modelos de idioma instalados ou configurados.
+- As capturas de diagnóstico ficam somente no computador, podem conter partes da tela e param de ser criadas ao atingir o limite de segurança.
 - A primeira inicialização de alguns mecanismos OCR pode demorar um pouco; o aquecimento começa junto com a animação de abertura.
 - Ainda não existe um instalador pronto; por enquanto, o aplicativo é iniciado pelos comandos acima.

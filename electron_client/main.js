@@ -429,14 +429,19 @@ function setCaptureShortcut(action, type, value) {
 }
 
 function createSettingsWindow() {
+    const workArea = screen.getPrimaryDisplay().workArea;
+    const windowWidth = Math.min(1040, workArea.width);
+    const windowHeight = Math.min(720, workArea.height);
     settingsWindow = new BrowserWindow({
         title: APP_NAME,
         icon: APP_ICON_PATH,
-        width: 1040,
-        height: 720,
+        width: windowWidth,
+        height: windowHeight,
+        minWidth: Math.min(760, windowWidth),
+        minHeight: Math.min(560, windowHeight),
         frame: false,
         transparent: true,
-        resizable: false,
+        resizable: true,
         backgroundColor: '#00000000',
         show: false,
         webPreferences: getWebPreferences()
@@ -542,7 +547,10 @@ function createIntroWindow() {
 }
 
 async function getBridgeStatus() {
-    const status = await bridgeRuntime.checkStatus(1500);
+    let status = await bridgeRuntime.checkStatus(1500);
+    if (status.state === 'offline') {
+        status = await bridgeRuntime.start();
+    }
     if (status.ready) {
         return { state: 'ready', label: 'OCR local pronto' };
     }
