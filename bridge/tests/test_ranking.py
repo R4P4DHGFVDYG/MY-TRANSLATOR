@@ -105,6 +105,16 @@ def test_text_quality_penalizes_empty_text():
     assert text_quality_score("", 0.9) == 0.0
 
 
+def test_unknown_confidence_is_missing_evidence_instead_of_zero_confidence():
+    unknown = text_quality_score("HELLO WORLD", None)
+    known_zero = text_quality_score("HELLO WORLD", 0.0)
+
+    assert unknown > known_zero
+    result = EngineResult("windowsocr", "HELLO WORLD", unknown, None)
+    assert result.to_dict()["confidenceKnown"] is False
+    assert "rawConfidence" not in result.to_dict()
+
+
 def test_rank_prefers_consensus_and_confidence():
     weak = EngineResult("tesseract", "HELLO W0RLD", 0.6, 0.6)
     strong = EngineResult("easyocr", "HELLO WORLD", 0.72, 0.72)
@@ -277,3 +287,4 @@ def test_ranking_and_serialization_ignore_non_finite_confidence_values():
     assert best is valid
     assert invalid.to_dict()["score"] == 0.0
     assert "rawConfidence" not in invalid.to_dict()
+    assert invalid.to_dict()["confidenceKnown"] is False

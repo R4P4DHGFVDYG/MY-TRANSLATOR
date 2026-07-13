@@ -65,7 +65,7 @@ def normalize_ocr_text(text: str) -> str:
 
 
 def text_quality_score(
-    text: str, confidence: float, *, raw_text: str | None = None
+    text: str, confidence: float | None, *, raw_text: str | None = None
 ) -> float:
     normalized = normalize_ocr_text(text)
     if not normalized:
@@ -84,16 +84,20 @@ def text_quality_score(
     content_ratio = content_count / len(chars)
     length_bonus = min(len(normalized) / 80, 1.0)
     word_bonus = min(len(words) / 8, 1.0)
-    confidence = _bounded_number(confidence)
-
-    score = (
-        confidence * 0.55
-        + printable_ratio * 0.1
+    confidence = _bounded_optional_number(confidence)
+    visual_score = (
+        printable_ratio * 0.1
         + accepted_ratio * 0.13
         + content_ratio * 0.07
         + length_bonus * 0.08
         + word_bonus * 0.07
     )
+    if confidence is None:
+        # Some engines, notably Windows OCR, do not expose confidence. Treat
+        # that as missing evidence instead of a zero-confidence result.
+        score = min(0.86, (visual_score / 0.45) * 0.86)
+    else:
+        score = confidence * 0.55 + visual_score
 
     if len(normalized) < 2:
         score *= 0.25
@@ -156,6 +160,10 @@ def rank_ocr_results(
     if not candidates:
         return None
 
+    for result in candidates:
+        result.score = _bounded_number(result.score)
+        result.raw_confidence = _bounded_optional_number(result.raw_confidence)
+
     normalized_texts = {
         id(result): normalize_ocr_text(result.text).lower() for result in candidates
     }
@@ -168,15 +176,13 @@ def rank_ocr_results(
             exact_consensus,
             key=lambda item: (
                 item.score,
-                item.raw_confidence,
+                _confidence_rank_value(item.raw_confidence),
                 len(item.text),
             ),
         )
 
     adjusted_scores: dict[int, float] = {}
     for result in candidates:
-        result.score = _bounded_number(result.score)
-        result.raw_confidence = _bounded_number(result.raw_confidence)
         adjusted_score = result.score
         for other in candidates:
             if (
@@ -198,7 +204,7 @@ def rank_ocr_results(
         candidates,
         key=lambda item: (
             adjusted_scores[id(item)],
-            item.raw_confidence,
+            _confidence_rank_value(item.raw_confidence),
             len(item.text),
         ),
     )
@@ -217,7 +223,7 @@ def rank_ocr_results(
         primary_candidates,
         key=lambda item: (
             adjusted_scores[id(item)],
-            item.raw_confidence,
+            _confidence_rank_value(item.raw_confidence),
             len(item.text),
         ),
     )
@@ -226,6 +232,7 @@ def rank_ocr_results(
 
     primary_is_reliable = (
         primary.score >= _bounded_number(accept_score)
+        and primary.raw_confidence is not None
         and primary.raw_confidence >= _bounded_number(accept_confidence)
     )
     similarity = SequenceMatcher(
@@ -234,7 +241,7 @@ def rank_ocr_results(
         normalized_texts[id(strongest)],
     ).ratio()
     score_advantage = strongest.score - primary.score
-    confidence_advantage = strongest.raw_confidence - primary.raw_confidence
+    confidence_advantage = _known_confidence_advantage(strongest, primary)
     verifier_has_clear_advantage = (
         adjusted_scores[id(strongest)] - adjusted_scores[id(primary)] >= 0.08
         or (score_advantage >= 0.03 and confidence_advantage >= 0.04)
@@ -267,6 +274,10 @@ def _exact_cross_engine_consensus(
         cluster
         for cluster in clusters.values()
         if len({_base_engine(result.engine) for result in cluster}) >= 2
+        and not any(
+            ocr_suspicion_score(result.raw_text or result.text) > 0
+            for result in cluster
+        )
     ]
     if not consensus_clusters:
         return []
@@ -430,3 +441,27 @@ def _bounded_number(value: object) -> float:
     if not math.isfinite(number):
         return 0.0
     return _clamp(number, 0.0, 1.0)
+
+
+def _bounded_optional_number(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return _clamp(number, 0.0, 1.0)
+
+
+def _confidence_rank_value(value: float | None) -> float:
+    return value if value is not None else -1.0
+
+
+def _known_confidence_advantage(
+    strongest: EngineResult, primary: EngineResult
+) -> float:
+    if strongest.raw_confidence is None or primary.raw_confidence is None:
+        return 0.0
+    return strongest.raw_confidence - primary.raw_confidence

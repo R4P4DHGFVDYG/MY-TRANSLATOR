@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 
+import threading
+
 from PIL import Image
 import pytest
 
@@ -70,7 +72,8 @@ def test_windows_ocr_compares_binary_and_standard_without_fake_confidence(
         "windowsocr:binary",
         "windowsocr:standard",
     ]
-    assert all(result.raw_confidence == 0 for result in results)
+    assert all(result.raw_confidence is None for result in results)
+    assert all(result.to_dict()["confidenceKnown"] is False for result in results)
 
 
 def test_windows_ocr_cache_is_scoped_by_source_language(monkeypatch):
@@ -128,6 +131,121 @@ def test_automatic_chain_continues_when_windows_ocr_is_unavailable(monkeypatch):
         "windowsocr:binary",
         "paddleocr:standard",
     ]
+
+
+def test_automatic_profile_runs_fast_engines_in_parallel_and_skips_paddle_on_consensus(
+    monkeypatch,
+):
+    service = OcrService(
+        BridgeConfig(ocr_max_variants=1, ocr_max_parallel_engines=2)
+    )
+    rendezvous = threading.Barrier(2)
+    paddle_calls = 0
+
+    def fake_tesseract(_image):
+        rendezvous.wait(timeout=1)
+        return EngineResult("tesseract", "HELLO WORLD", 0.95, 0.95)
+
+    def fake_windowsocr(_image, _language=None):
+        rendezvous.wait(timeout=1)
+        return EngineResult("windowsocr", "HELLO WORLD", 0.0, None)
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "SHOULD NOT RUN", 0.99, 0.99)
+
+    monkeypatch.setattr(service, "_run_tesseract", fake_tesseract)
+    monkeypatch.setattr(service, "_run_windowsocr", fake_windowsocr)
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "windowsocr", "paddleocr"],
+        language_tag="en",
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "HELLO WORLD"
+    assert paddle_calls == 0
+    assert {_result.engine.split(":", 1)[0] for _result in results} == {
+        "tesseract",
+        "windowsocr",
+    }
+
+
+def test_automatic_profile_uses_paddle_when_fast_engines_disagree(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_max_variants=1))
+    paddle_calls = 0
+
+    monkeypatch.setattr(
+        service,
+        "_run_tesseract",
+        lambda _image: EngineResult("tesseract", "HELLO W0RLD", 0.8, 0.8),
+    )
+    monkeypatch.setattr(
+        service,
+        "_run_windowsocr",
+        lambda _image, _language=None: EngineResult(
+            "windowsocr", "HELLO WORLD", 0.0, None
+        ),
+    )
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "HELLO WORLD", 0.96, 0.96)
+
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "windowsocr", "paddleocr"],
+    )
+
+    assert warnings == []
+    assert paddle_calls == 1
+    assert best is not None
+    assert best.text == "HELLO WORLD"
+    assert any(result.engine.startswith("paddleocr:") for result in results)
+
+
+def test_automatic_profile_verifies_suspicious_fast_consensus_with_paddle(
+    monkeypatch,
+):
+    service = OcrService(BridgeConfig(ocr_max_variants=1))
+    paddle_calls = 0
+
+    monkeypatch.setattr(
+        service,
+        "_run_tesseract",
+        lambda _image: EngineResult("tesseract", "H3LLO", 0.91, 0.91),
+    )
+    monkeypatch.setattr(
+        service,
+        "_run_windowsocr",
+        lambda _image, _language=None: EngineResult(
+            "windowsocr", "H3LLO", 0.0, None
+        ),
+    )
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "HELLO", 0.97, 0.97)
+
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, _results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "windowsocr", "paddleocr"],
+    )
+
+    assert warnings == []
+    assert paddle_calls == 1
+    assert best is not None
+    assert best.text == "HELLO"
 
 
 def test_paddleocr_engine_can_be_requested(monkeypatch):

@@ -17,12 +17,19 @@ from .cache import TTLCache
 from .config import BridgeConfig
 from .image_utils import preprocess_variants_for_ocr
 from .models import EngineResult
-from .ranking import normalize_ocr_text, rank_ocr_results, text_quality_score
+from .ranking import (
+    normalize_ocr_text,
+    ocr_suspicion_score,
+    rank_ocr_results,
+    text_quality_score,
+)
 from .text_region import isolate_text_region
 from .windows_ocr import WindowsOcrAdapter, windows_ocr_health
 
 
 DEFAULT_ENGINES = ["tesseract"]
+AUTOMATIC_PROFILE_ENGINES = ("tesseract", "windowsocr", "paddleocr")
+AUTOMATIC_FAST_ENGINES = ("tesseract", "windowsocr")
 SUPPORTED_ENGINES = frozenset(
     {"windowsocr", "easyocr", "paddleocr", "tesseract"}
 )
@@ -167,42 +174,36 @@ class OcrService:
 
             recognition_image = isolate_text_region(image)
 
-            engine_tasks = [
-                (
-                    engine,
-                    preprocess_variants_for_ocr(
+            if tuple(normalized_engines) == AUTOMATIC_PROFILE_ENGINES:
+                automatic_results, automatic_warnings = (
+                    self._detect_automatic_profile(
                         recognition_image,
-                        max_variants=self.config.ocr_max_variants,
-                        engine=engine,
-                    ),
-                )
-                for engine in normalized_engines
-            ]
-
-            if self.config.ocr_parallel_engines and len(engine_tasks) > 1:
-                parallel_results, parallel_warnings = self._detect_engines_parallel(
-                    engine_tasks,
-                    cancel_check,
-                    language_tag,
-                )
-                results.extend(parallel_results)
-                warnings.extend(parallel_warnings)
-            else:
-                for normalized_engine, engine_variants in engine_tasks:
-                    engine_results, engine_warnings = self._detect_engine_variants(
-                        normalized_engine,
-                        engine_variants,
                         cancel_check,
                         language_tag,
                     )
-                    results.extend(engine_results)
-                    warnings.extend(engine_warnings)
-                    if self._engine_results_are_conclusive(
-                        normalized_engine,
-                        engine_results,
-                        available_variants=len(engine_variants),
-                    ):
-                        break
+                )
+                results.extend(automatic_results)
+                warnings.extend(automatic_warnings)
+            else:
+                engine_tasks = [
+                    (
+                        engine,
+                        preprocess_variants_for_ocr(
+                            recognition_image,
+                            max_variants=self.config.ocr_max_variants,
+                            engine=engine,
+                        ),
+                    )
+                    for engine in normalized_engines
+                ]
+
+                self._detect_configured_engines(
+                    engine_tasks,
+                    results,
+                    warnings,
+                    cancel_check,
+                    language_tag,
+                )
 
             best = rank_ocr_results(
                 results,
@@ -218,6 +219,116 @@ class OcrService:
             return best, results, warnings, {"cacheHit": False}
         finally:
             self._request_slots.release()
+
+    def _detect_configured_engines(
+        self,
+        engine_tasks: list[tuple[str, list[tuple[str, Image.Image]]]],
+        results: list[EngineResult],
+        warnings: list[str],
+        cancel_check: Callable[[], bool] | None,
+        language_tag: str | None,
+    ) -> None:
+        if self.config.ocr_parallel_engines and len(engine_tasks) > 1:
+            parallel_results, parallel_warnings = self._detect_engines_parallel(
+                engine_tasks,
+                cancel_check,
+                language_tag,
+            )
+            results.extend(parallel_results)
+            warnings.extend(parallel_warnings)
+            return
+
+        for normalized_engine, engine_variants in engine_tasks:
+            engine_results, engine_warnings = self._detect_engine_variants(
+                normalized_engine,
+                engine_variants,
+                cancel_check,
+                language_tag,
+            )
+            results.extend(engine_results)
+            warnings.extend(engine_warnings)
+            if self._engine_results_are_conclusive(
+                normalized_engine,
+                engine_results,
+                available_variants=len(engine_variants),
+            ):
+                break
+
+    def _detect_automatic_profile(
+        self,
+        image: Image.Image,
+        cancel_check: Callable[[], bool] | None,
+        language_tag: str | None,
+    ) -> tuple[list[EngineResult], list[str]]:
+        fast_tasks = [
+            (
+                engine,
+                preprocess_variants_for_ocr(
+                    image,
+                    max_variants=self.config.ocr_max_variants,
+                    engine=engine,
+                ),
+            )
+            for engine in AUTOMATIC_FAST_ENGINES
+        ]
+        results, warnings = self._detect_engines_parallel(
+            fast_tasks,
+            cancel_check,
+            language_tag,
+        )
+        _raise_if_cancelled(cancel_check)
+
+        if self._automatic_fast_result_is_conclusive(results):
+            return results, warnings
+
+        paddle_variants = preprocess_variants_for_ocr(
+            image,
+            max_variants=self.config.ocr_max_variants,
+            engine="paddleocr",
+        )
+        paddle_results, paddle_warnings = self._detect_engine_variants(
+            "paddleocr",
+            paddle_variants,
+            cancel_check,
+            language_tag,
+        )
+        results.extend(paddle_results)
+        warnings.extend(paddle_warnings)
+        return results, warnings
+
+    def _automatic_fast_result_is_conclusive(
+        self, results: list[EngineResult]
+    ) -> bool:
+        clusters: dict[str, list[EngineResult]] = {}
+        for result in results:
+            base_engine = _base_engine(result.engine)
+            normalized = normalize_ocr_text(result.text).casefold()
+            if base_engine in AUTOMATIC_FAST_ENGINES and normalized:
+                clusters.setdefault(normalized, []).append(result)
+
+        consensus = [
+            cluster
+            for cluster in clusters.values()
+            if {_base_engine(result.engine) for result in cluster}
+            >= set(AUTOMATIC_FAST_ENGINES)
+        ]
+        if not consensus:
+            return False
+
+        strongest_cluster = max(
+            consensus,
+            key=lambda cluster: (
+                max(result.score for result in cluster),
+                len(cluster[0].text),
+            ),
+        )
+        consensus_text = normalize_ocr_text(strongest_cluster[0].text)
+        if len(consensus_text) < 2 or not any(ch.isalnum() for ch in consensus_text):
+            return False
+        return not any(
+            ocr_suspicion_score(result.raw_text or result.text) > 0
+            for result in strongest_cluster
+        )
 
     def _acquire_request_slot(
         self, cancel_check: Callable[[], bool] | None = None
@@ -393,11 +504,11 @@ class OcrService:
         return results, warnings
 
     def _is_reliable_result(self, result: EngineResult | None) -> bool:
-        return bool(
-            result
-            and result.score >= self.config.ocr_accept_score
-            and result.raw_confidence >= self.config.ocr_accept_confidence
-        )
+        if not result or result.score < self.config.ocr_accept_score:
+            return False
+        if result.raw_confidence is None:
+            return result.score >= max(self.config.ocr_accept_score, 0.86)
+        return result.raw_confidence >= self.config.ocr_accept_confidence
 
     def _engine_results_are_conclusive(
         self,
@@ -477,7 +588,7 @@ class OcrService:
         language_tag: str | None = None,
     ) -> EngineResult:
         text = self._get_windowsocr_adapter().recognize(image, language_tag)
-        return EngineResult("windowsocr", text, 0.0, 0.0)
+        return EngineResult("windowsocr", text, 0.0, None)
 
     def _get_windowsocr_adapter(self) -> WindowsOcrAdapter:
         if self._windowsocr_adapter is None:
@@ -748,6 +859,10 @@ class OcrService:
                 "language": self.config.tesseract_lang,
                 "error": str(exc),
             }
+
+
+def _base_engine(engine: str) -> str:
+    return str(engine).split(":", 1)[0].strip().lower()
 
 
 def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:

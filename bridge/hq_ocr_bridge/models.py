@@ -9,19 +9,21 @@ class EngineResult:
     engine: str
     text: str
     score: float
-    raw_confidence: float = 0.0
+    raw_confidence: float | None = None
     warning: str | None = None
     raw_text: str | None = None
 
     def to_dict(self) -> dict:
         score = _finite_float(self.score)
-        raw_confidence = _finite_float(self.raw_confidence)
+        raw_confidence = _finite_optional_float(self.raw_confidence)
         data = {
             "engine": self.engine,
             "text": self.text,
             "score": round(score, 4),
         }
-        if raw_confidence:
+        if raw_confidence is None:
+            data["confidenceKnown"] = False
+        else:
             data["rawConfidence"] = round(raw_confidence, 4)
         if self.warning:
             data["warning"] = self.warning
@@ -37,3 +39,13 @@ def _finite_float(value: float) -> float:
     except (TypeError, ValueError):
         return 0.0
     return number if math.isfinite(number) else 0.0
+
+
+def _finite_optional_float(value: float | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
