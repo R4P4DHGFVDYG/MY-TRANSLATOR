@@ -18,6 +18,7 @@ from .config import BridgeConfig
 from .image_utils import preprocess_variants_for_ocr
 from .models import EngineResult
 from .ranking import normalize_ocr_text, rank_ocr_results, text_quality_score
+from .text_region import isolate_text_region
 
 
 DEFAULT_ENGINES = ["tesseract"]
@@ -146,11 +147,13 @@ class OcrService:
 
             _raise_if_cancelled(cancel_check)
 
+            recognition_image = isolate_text_region(image)
+
             engine_tasks = [
                 (
                     engine,
                     preprocess_variants_for_ocr(
-                        image,
+                        recognition_image,
                         max_variants=self.config.ocr_max_variants,
                         engine=engine,
                     ),
@@ -174,7 +177,11 @@ class OcrService:
                     )
                     results.extend(engine_results)
                     warnings.extend(engine_warnings)
-                    if self._is_reliable_result(rank_ocr_results(engine_results)):
+                    if self._engine_results_are_conclusive(
+                        normalized_engine,
+                        engine_results,
+                        available_variants=len(engine_variants),
+                    ):
                         break
 
             best = rank_ocr_results(
@@ -285,9 +292,16 @@ class OcrService:
     ) -> tuple[list[EngineResult], list[str]]:
         results: list[EngineResult] = []
         warnings: list[str] = []
+        minimum_attempts = (
+            min(2, len(engine_variants))
+            if normalized_engine == "tesseract"
+            else 1
+        )
+        attempted = 0
 
         for variant_name, prepared in engine_variants:
             _raise_if_cancelled(cancel_check)
+            attempted += 1
             try:
                 result = self._run_engine_with_timeout(normalized_engine, prepared)
             except TimeoutError:
@@ -333,8 +347,16 @@ class OcrService:
                 raw_text=result.raw_text,
             )
             results.append(result)
-            if self._is_reliable_result(result):
-                break
+            if attempted >= minimum_attempts and self._is_reliable_result(result):
+                if normalized_engine != "tesseract" or len(engine_variants) == 1:
+                    break
+                texts = [
+                    normalize_ocr_text(candidate.text).casefold()
+                    for candidate in results
+                    if normalize_ocr_text(candidate.text)
+                ]
+                if len(texts) >= 2 and len(set(texts)) == 1:
+                    break
             _raise_if_cancelled(cancel_check)
 
         return results, warnings
@@ -345,6 +367,27 @@ class OcrService:
             and result.score >= self.config.ocr_accept_score
             and result.raw_confidence >= self.config.ocr_accept_confidence
         )
+
+    def _engine_results_are_conclusive(
+        self,
+        engine: str,
+        results: list[EngineResult],
+        *,
+        available_variants: int,
+    ) -> bool:
+        best = rank_ocr_results(results)
+        if not self._is_reliable_result(best):
+            return False
+        if engine != "tesseract":
+            return True
+
+        required = min(2, available_variants)
+        texts = [
+            normalize_ocr_text(result.text).casefold()
+            for result in results
+            if normalize_ocr_text(result.text)
+        ]
+        return len(texts) >= required and len(set(texts)) == 1
 
     def _run_engine_with_timeout(
         self, normalized_engine: str, image: Image.Image
@@ -749,6 +792,7 @@ def _ordered_paddleocr_fragments(
         )
 
     if entries and all(entry["geometry"] is not None for entry in entries):
+        entries = _filtered_paddle_entries(entries)
         entries = _sort_paddle_entries(entries)
     return [(entry["text"], entry["confidence"]) for entry in entries]
 
@@ -839,6 +883,56 @@ def _sort_paddle_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         line.sort(key=lambda entry: (entry["geometry"][0], entry["index"]))
         ordered.extend(line)
     return ordered
+
+
+def _filtered_paddle_entries(
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    reliable = [
+        entry
+        for entry in entries
+        if entry["confidence"] is not None and entry["confidence"] >= 0.70
+    ]
+    if not reliable:
+        return entries
+
+    reliable_heights = sorted(
+        entry["geometry"][3] - entry["geometry"][1]
+        for entry in reliable
+    )
+    median_height = reliable_heights[len(reliable_heights) // 2]
+    filtered: list[dict[str, Any]] = []
+    for entry in entries:
+        confidence = entry["confidence"]
+        left, top, right, bottom = entry["geometry"]
+        height = bottom - top
+        center = (top + bottom) / 2
+        same_line_reliable = [
+            candidate
+            for candidate in reliable
+            if abs(
+                center
+                - (candidate["geometry"][1] + candidate["geometry"][3]) / 2
+            )
+            <= max(height, candidate["geometry"][3] - candidate["geometry"][1])
+            * 0.65
+        ]
+        is_small_leading_artifact = bool(
+            confidence is not None
+            and confidence < 0.65
+            and height < median_height * 0.75
+            and same_line_reliable
+            and right <= min(candidate["geometry"][0] for candidate in same_line_reliable)
+            and _looks_like_paddle_leading_artifact(entry["text"])
+        )
+        if not is_small_leading_artifact:
+            filtered.append(entry)
+    return filtered
+
+
+def _looks_like_paddle_leading_artifact(text: str) -> bool:
+    normalized = str(text).strip()
+    return normalized == "#" or any(character.isalnum() for character in normalized)
 
 
 def _filtered_tesseract_words(data: dict[str, Any]) -> list[tuple[str, float]]:

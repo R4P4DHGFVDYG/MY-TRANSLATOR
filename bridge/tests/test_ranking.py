@@ -51,6 +51,13 @@ def test_normalize_ocr_text_fixes_observed_paddleocr_confusions():
     )
 
 
+def test_normalize_ocr_text_fixes_observed_dialogue_punctuation_confusions():
+    assert normalize_ocr_text(
+        "HAHAT Susie, we : re supposed to hit them at the same timet"
+    ) == "HAHA! Susie, we're supposed to hit them at the same time!"
+    assert normalize_ocr_text("same timef") == "same time!"
+
+
 def test_normalize_ocr_text_fixes_observed_tesseract_confusions():
     assert normalize_ocr_text("* You quickly look away.") == (
         "You quickly look away."
@@ -107,12 +114,119 @@ def test_rank_prefers_consensus_and_confidence():
     assert best is strong
 
 
+def test_rank_prefers_exact_consensus_between_independent_engines():
+    standard = EngineResult("tesseract:standard", "S50 WHAT", 0.91, 0.92)
+    pixel = EngineResult("tesseract:pixel", "SO WHAT", 0.79, 0.80)
+    verifier = EngineResult("paddleocr:standard", "SO WHAT", 0.88, 0.95)
+
+    best = rank_ocr_results(
+        [standard, pixel, verifier],
+        primary_engine="tesseract",
+    )
+
+    assert best is verifier
+
+
+def test_same_engine_variants_do_not_create_independent_consensus():
+    standard = EngineResult("tesseract:standard", "PRIMARY", 0.81, 0.82)
+    pixel = EngineResult("tesseract:pixel", "PRIMARY", 0.82, 0.83)
+    verifier = EngineResult("paddleocr:standard", "CLEAR RESULT", 0.95, 0.96)
+
+    best = rank_ocr_results(
+        [standard, pixel, verifier],
+        primary_engine="tesseract",
+    )
+
+    assert best is verifier
+
+
 def test_rank_keeps_primary_spelling_when_verifier_is_similar_and_overconfident():
     primary = EngineResult(
         "tesseract:standard", "(It's your mom's van.)", 0.73, 0.72
     )
+    primary_variant = EngineResult(
+        "tesseract:pixel", "(It's your mom's van.)", 0.72, 0.71
+    )
     verifier = EngineResult(
         "paddleocr:standard", "(It's your mom's yan.", 0.95, 0.98
+    )
+
+    best = rank_ocr_results(
+        [primary, primary_variant, verifier],
+        primary_engine="tesseract",
+    )
+
+    assert best is primary
+
+
+def test_rank_uses_clear_verifier_advantage_without_primary_variant_consensus():
+    standard = EngineResult(
+        "tesseract:standard",
+        "HAHAT Susie, we're supposed to hit them at the same timef",
+        0.8999,
+        0.8867,
+    )
+    pixel = EngineResult(
+        "tesseract:pixel",
+        "HAHAT Susie, we're supposed to hit them at the same timet",
+        0.8839,
+        0.8575,
+    )
+    verifier = EngineResult(
+        "paddleocr:standard",
+        "HAHA! Susie, we: re supposed to hit them at the same timet",
+        0.9349,
+        0.9524,
+    )
+
+    best = rank_ocr_results(
+        [standard, pixel, verifier],
+        primary_engine="tesseract",
+    )
+
+    assert best is verifier
+
+
+def test_rank_uses_high_confidence_verifier_for_terminal_digit_artifact():
+    standard = EngineResult(
+        "tesseract:standard",
+        "U-unm... (maybe she's misunderstanding, but her face... 7)",
+        0.8298,
+        0.77,
+    )
+    pixel = EngineResult(
+        "tesseract:pixel",
+        "U-um... (maybe she's misunderstanding, but her face... 7)",
+        0.8486,
+        0.8067,
+    )
+    verifier = EngineResult(
+        "paddleocr:standard",
+        "U-um... (maybe she's misunderstanding, but her face...?)",
+        0.9301,
+        0.9733,
+    )
+
+    best = rank_ocr_results(
+        [standard, pixel, verifier],
+        primary_engine="tesseract",
+    )
+
+    assert best is verifier
+
+
+def test_rank_allows_clear_verifier_advantage_below_near_identity_threshold():
+    primary = EngineResult(
+        "tesseract:standard",
+        "U-unM maybe ail misunderstanding but her face 7",
+        0.81,
+        0.74,
+    )
+    verifier = EngineResult(
+        "paddleocr:standard",
+        "U-um maybe she's misunderstanding but her face",
+        0.93,
+        0.97,
     )
 
     best = rank_ocr_results(
@@ -120,7 +234,7 @@ def test_rank_keeps_primary_spelling_when_verifier_is_similar_and_overconfident(
         primary_engine="tesseract",
     )
 
-    assert best is primary
+    assert best is verifier
 
 
 def test_rank_uses_verifier_when_uncertain_primary_clearly_disagrees():

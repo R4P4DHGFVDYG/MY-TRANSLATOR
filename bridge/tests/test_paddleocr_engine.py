@@ -13,6 +13,7 @@ from hq_ocr_bridge.ocr import (
     OcrCapacityError,
     OcrService,
     _filtered_tesseract_words,
+    _ordered_paddleocr_fragments,
 )
 
 
@@ -135,7 +136,105 @@ def test_adaptive_engine_chain_skips_fallback_for_reliable_primary(monkeypatch):
     assert best is not None
     assert best.text == "CLEAR SUBTITLE"
     assert paddle_calls == 0
-    assert [result.engine for result in results] == ["tesseract:standard"]
+    assert [result.engine for result in results] == [
+        "tesseract:standard",
+        "tesseract:pixel",
+    ]
+
+
+def test_adaptive_engine_chain_uses_fallback_when_tesseract_variants_disagree(
+    monkeypatch,
+):
+    service = OcrService(BridgeConfig(ocr_parallel_engines=False))
+    tesseract_calls = 0
+    paddle_calls = 0
+
+    def fake_tesseract(_image):
+        nonlocal tesseract_calls
+        tesseract_calls += 1
+        text = "S50 WHAT" if tesseract_calls == 1 else "SO WHAT"
+        return EngineResult("tesseract", text, 0.95, 0.95)
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "SO WHAT", 0.94, 0.96)
+
+    monkeypatch.setattr(service, "_run_tesseract", fake_tesseract)
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "paddleocr"],
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "SO WHAT"
+    assert paddle_calls == 1
+    assert [result.engine for result in results] == [
+        "tesseract:standard",
+        "tesseract:pixel",
+        "paddleocr:standard",
+    ]
+
+
+def test_tesseract_tries_binary_when_first_two_variants_disagree(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_max_variants=3))
+    calls = 0
+
+    def fake_tesseract(_image):
+        nonlocal calls
+        calls += 1
+        texts = ["S50 WHAT", "SO WHAT", "SO WHAT"]
+        return EngineResult("tesseract", texts[calls - 1], 0.95, 0.95)
+
+    monkeypatch.setattr(service, "_run_tesseract", fake_tesseract)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract"],
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert calls == 3
+    assert [result.engine for result in results] == [
+        "tesseract:standard",
+        "tesseract:pixel",
+        "tesseract:binary",
+    ]
+
+
+def test_empty_second_tesseract_variant_allows_paddle_fallback(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_parallel_engines=False))
+    tesseract_calls = 0
+    paddle_calls = 0
+
+    def fake_tesseract(_image):
+        nonlocal tesseract_calls
+        tesseract_calls += 1
+        text = "CLEAR SUBTITLE" if tesseract_calls == 1 else ""
+        confidence = 0.95 if text else 0.0
+        return EngineResult("tesseract", text, confidence, confidence)
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "CLEAR SUBTITLE", 0.95, 0.95)
+
+    monkeypatch.setattr(service, "_run_tesseract", fake_tesseract)
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, _results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "paddleocr"],
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "CLEAR SUBTITLE"
+    assert paddle_calls == 1
 
 
 def test_adaptive_engine_chain_uses_fallback_for_uncertain_primary(monkeypatch):
@@ -170,6 +269,37 @@ def test_adaptive_engine_chain_uses_fallback_for_uncertain_primary(monkeypatch):
         "tesseract:standard",
         "paddleocr:standard",
     ]
+
+
+def test_single_variant_override_accepts_reliable_tesseract(monkeypatch):
+    service = OcrService(
+        BridgeConfig(ocr_parallel_engines=False, ocr_max_variants=1)
+    )
+    paddle_calls = 0
+
+    monkeypatch.setattr(
+        service,
+        "_run_tesseract",
+        lambda _image: EngineResult("tesseract", "CLEAR SUBTITLE", 0.95, 0.95),
+    )
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "UNNECESSARY", 0.99, 0.99)
+
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "paddleocr"],
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "CLEAR SUBTITLE"
+    assert paddle_calls == 0
+    assert [result.engine for result in results] == ["tesseract:standard"]
 
 
 def test_easyocr_uses_accuracy_focused_decoder_without_png_reencoding(monkeypatch):
@@ -220,6 +350,75 @@ def test_paddleocr_orders_fragments_by_visual_lines(monkeypatch):
 
     assert result.text == "FIRST SECOND THIRD FOURTH"
     assert result.raw_confidence == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize("artifact", ["LE", "#"])
+def test_paddleocr_filters_small_low_confidence_leading_artifact(artifact):
+    payload = {
+        "rec_texts": [artifact, "HELLO", "WORLD"],
+        "rec_scores": [0.42, 0.96, 0.94],
+        "rec_boxes": [
+            [8, 18, 27, 34],
+            [36, 10, 118, 42],
+            [126, 10, 214, 42],
+        ],
+    }
+
+    assert _ordered_paddleocr_fragments(payload) == [
+        ("HELLO", 0.96),
+        ("WORLD", 0.94),
+    ]
+
+
+def test_paddleocr_preserves_normal_sized_initial_word_with_low_confidence():
+    payload = {
+        "rec_texts": ["WELCOME", "HOME"],
+        "rec_scores": [0.62, 0.95],
+        "rec_boxes": [
+            [8, 10, 126, 42],
+            [134, 10, 210, 42],
+        ],
+    }
+
+    assert _ordered_paddleocr_fragments(payload) == [
+        ("WELCOME", 0.62),
+        ("HOME", 0.95),
+    ]
+
+
+def test_paddleocr_preserves_confident_small_initial_fragment():
+    payload = {
+        "rec_texts": ["LE", "HELLO", "WORLD"],
+        "rec_scores": [0.91, 0.96, 0.94],
+        "rec_boxes": [
+            [8, 18, 27, 34],
+            [36, 10, 118, 42],
+            [126, 10, 214, 42],
+        ],
+    }
+
+    assert _ordered_paddleocr_fragments(payload) == [
+        ("LE", 0.91),
+        ("HELLO", 0.96),
+        ("WORLD", 0.94),
+    ]
+
+
+@pytest.mark.parametrize("punctuation", ["(", '"', "...", "*"])
+def test_paddleocr_preserves_small_leading_punctuation(punctuation):
+    payload = {
+        "rec_texts": [punctuation, "HELLO"],
+        "rec_scores": [0.42, 0.96],
+        "rec_boxes": [
+            [8, 18, 20, 34],
+            [28, 10, 110, 42],
+        ],
+    }
+
+    assert _ordered_paddleocr_fragments(payload) == [
+        (punctuation, 0.42),
+        ("HELLO", 0.96),
+    ]
 
 
 def test_tesseract_uses_sparse_text_fallback_only_for_uncertain_primary(monkeypatch):

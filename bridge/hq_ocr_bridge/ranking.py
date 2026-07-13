@@ -23,8 +23,11 @@ SMART_PUNCTUATION = str.maketrans(
 )
 COMMON_WORD_FIXES = {
     "CLRE": "CURE",
+    "HAHAT": "HAHA!",
     "LNCLEAN": "UNCLEAN",
     "MLCH": "MUCH",
+    "TIMEF": "TIME!",
+    "TIMET": "TIME!",
     "YOL": "YOU",
 }
 CONTRACTION_FIXES = {
@@ -156,6 +159,20 @@ def rank_ocr_results(
     normalized_texts = {
         id(result): normalize_ocr_text(result.text).lower() for result in candidates
     }
+    exact_consensus = _exact_cross_engine_consensus(
+        candidates,
+        normalized_texts,
+    )
+    if exact_consensus:
+        return max(
+            exact_consensus,
+            key=lambda item: (
+                item.score,
+                item.raw_confidence,
+                len(item.text),
+            ),
+        )
+
     adjusted_scores: dict[int, float] = {}
     for result in candidates:
         result.score = _bounded_number(result.score)
@@ -216,16 +233,65 @@ def rank_ocr_results(
         normalized_texts[id(primary)],
         normalized_texts[id(strongest)],
     ).ratio()
+    score_advantage = strongest.score - primary.score
+    confidence_advantage = strongest.raw_confidence - primary.raw_confidence
     verifier_has_clear_advantage = (
         adjusted_scores[id(strongest)] - adjusted_scores[id(primary)] >= 0.08
+        or (score_advantage >= 0.03 and confidence_advantage >= 0.04)
     )
-    if primary_is_reliable or similarity >= 0.82 or not verifier_has_clear_advantage:
+    primary_has_variant_consensus = _same_engine_variant_consensus(
+        primary,
+        primary_candidates,
+        normalized_texts,
+    )
+    if similarity >= 0.90 and primary_has_variant_consensus:
+        return primary
+    if primary_is_reliable and not verifier_has_clear_advantage:
         return primary
     return strongest
 
 
 def _base_engine(engine: str) -> str:
     return str(engine).split(":", 1)[0].strip().lower()
+
+
+def _exact_cross_engine_consensus(
+    candidates: list[EngineResult],
+    normalized_texts: dict[int, str],
+) -> list[EngineResult]:
+    clusters: dict[str, list[EngineResult]] = {}
+    for candidate in candidates:
+        clusters.setdefault(normalized_texts[id(candidate)], []).append(candidate)
+
+    consensus_clusters = [
+        cluster
+        for cluster in clusters.values()
+        if len({_base_engine(result.engine) for result in cluster}) >= 2
+    ]
+    if not consensus_clusters:
+        return []
+    return max(
+        consensus_clusters,
+        key=lambda cluster: (
+            len({_base_engine(result.engine) for result in cluster}),
+            max(result.score for result in cluster),
+            len(cluster[0].text),
+        ),
+    )
+
+
+def _same_engine_variant_consensus(
+    primary: EngineResult,
+    primary_candidates: list[EngineResult],
+    normalized_texts: dict[int, str],
+) -> bool:
+    primary_text = normalized_texts[id(primary)]
+    agreeing_variants = {
+        result.engine.strip().lower()
+        for result in primary_candidates
+        if normalized_texts[id(result)] == primary_text
+    }
+    return len(agreeing_variants) >= 2
 
 
 def _fix_comic_letter_confusions(text: str) -> str:
@@ -264,6 +330,12 @@ def _fix_comic_letter_confusions(text: str) -> str:
 
 
 def _fix_contractions(text: str) -> str:
+    text = re.sub(
+        r"\b(I|you|we|they|he|she|it)\s*[:;]\s*(m|re|ve|ll|d|s)\b",
+        lambda match: f"{match.group(1)}'{match.group(2)}",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = re.sub(
         r"\b(can|couldn|didn|doesn|don|isn|shouldn|wasn|weren|won|wouldn)\s+t\b",
         lambda match: f"{match.group(1)}'t",

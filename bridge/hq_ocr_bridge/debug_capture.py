@@ -10,6 +10,7 @@ from PIL import Image
 
 from .config import BridgeConfig
 from .image_utils import preprocess_variants_for_ocr
+from .text_region import isolate_text_region
 
 
 class DebugCapture:
@@ -26,7 +27,9 @@ class DebugCapture:
         self.directory.mkdir(parents=True, exist_ok=False)
 
         crop.save(self.directory / "crop.png")
-        variants = preprocess_variants_for_ocr(crop)
+        ocr_region = isolate_text_region(crop)
+        ocr_region.save(self.directory / "ocr-region.png")
+        variants = preprocess_variants_for_ocr(ocr_region)
         variants[0][1].save(self.directory / "ocr-preprocessed.png")
         for variant_name, variant_image in variants:
             variant_image.save(self.directory / f"ocr-preprocessed-{variant_name}.png")
@@ -42,6 +45,11 @@ class DebugCapture:
                 "debug": payload.get("debug"),
                 "imageDataUrlLength": len(str(payload.get("imageDataUrl") or "")),
                 "crop": crop_meta,
+                "ocrRegion": {
+                    "width": ocr_region.width,
+                    "height": ocr_region.height,
+                    "cropped": ocr_region.size != crop.size,
+                },
             },
         )
 

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+import json
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from hq_ocr_bridge.app import create_app
 from hq_ocr_bridge.config import BridgeConfig
@@ -368,16 +369,73 @@ def test_debug_capture_writes_crop_and_metadata(tmp_path):
     assert set(payload["debugCapture"]) == {"id"}
     debug_dir = tmp_path / payload["debugCapture"]["id"]
     assert (debug_dir / "crop.png").exists()
+    assert (debug_dir / "ocr-region.png").exists()
     assert (debug_dir / "ocr-preprocessed.png").exists()
     assert (debug_dir / "ocr-preprocessed-standard.png").exists()
     assert (debug_dir / "ocr-preprocessed-pixel.png").exists()
     assert (debug_dir / "ocr-preprocessed-binary.png").exists()
     assert (debug_dir / "request.json").exists()
     assert (debug_dir / "response.json").exists()
+    request_metadata = json.loads(
+        (debug_dir / "request.json").read_text(encoding="utf-8")
+    )
+    assert request_metadata["ocrRegion"] == {
+        "width": 20,
+        "height": 20,
+        "cropped": False,
+    }
 
 
-def _png_data_url() -> str:
-    image = Image.new("RGB", (20, 20), "white")
+def test_debug_capture_saves_the_isolated_text_region(tmp_path):
+    app = create_app(
+        BridgeConfig(
+            debug_capture_dir=str(tmp_path),
+            allow_request_debug_captures=True,
+        ),
+        ocr_service=FakeOcrService(),
+        translator=FakeTranslator(),
+    )
+    image = Image.new("RGB", (600, 180), "black")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 15, 130, 165), outline="white", width=8)
+    draw.ellipse((45, 45, 105, 105), outline="white", width=6)
+    for line in range(3):
+        y = 28 + line * 50
+        for character in range(12):
+            x = 220 + character * 25
+            draw.rectangle((x, y, x + 12, y + 27), fill="white")
+
+    response = app.test_client().post(
+        "/v1/translate-selection",
+        json={
+            "imageDataUrl": _png_data_url(image),
+            "selection": {"x": 0, "y": 0, "width": 600, "height": 180},
+            "viewport": {"width": 600, "height": 180},
+            "debug": True,
+        },
+    )
+
+    assert response.status_code == 200
+    debug_dir = tmp_path / response.get_json()["debugCapture"]["id"]
+    with Image.open(debug_dir / "crop.png") as crop:
+        assert crop.size == (600, 180)
+    with Image.open(debug_dir / "ocr-region.png") as ocr_region:
+        region_size = ocr_region.size
+
+    request_metadata = json.loads(
+        (debug_dir / "request.json").read_text(encoding="utf-8")
+    )
+    assert 340 <= region_size[0] <= 410
+    assert region_size[1] == 180
+    assert request_metadata["ocrRegion"] == {
+        "width": region_size[0],
+        "height": region_size[1],
+        "cropped": True,
+    }
+
+
+def _png_data_url(image: Image.Image | None = None) -> str:
+    image = image or Image.new("RGB", (20, 20), "white")
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     data = base64.b64encode(buffer.getvalue()).decode("ascii")
