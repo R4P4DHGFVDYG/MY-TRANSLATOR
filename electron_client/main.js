@@ -6,6 +6,7 @@ const { FixedAreaChangeTracker, rectanglesOverlap, toastSizeForFixedArea } = req
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
 const { normalizeFontFamily, normalizeFontSize, normalizeTextAlign } = require('./appearance');
 const { OCR_ENGINES, resolveOcrEngines } = require('./ocr_profile');
+const { BridgeRuntime } = require('./bridge_runtime');
 
 const APP_NAME = 'G.R.C TRANSLATOR';
 const APP_ICON_PATH = path.join(__dirname, 'assets', 'spider-intro.png');
@@ -29,6 +30,11 @@ const TARGET_LANGUAGES = new Set(['pt-BR', 'en']);
 const TOAST_POSITIONS = new Set(['custom', 'mouse', 'top', 'bottom', 'center']);
 const SHORTCUT_ACTIONS = new Set(['fixed', 'temporary', 'stop']);
 const FALLBACK_SYSTEM_FONTS = ['Segoe UI', 'Arial', 'Calibri', 'Tahoma', 'Verdana', 'Georgia', 'Consolas'];
+const bridgeRuntime = new BridgeRuntime({
+    baseDir: __dirname,
+    resourcesPath: process.resourcesPath,
+    readyUrl: BRIDGE_READY_URL
+});
 
 let settingsWindow = null;
 let introWindow = null;
@@ -497,20 +503,17 @@ function createIntroWindow() {
 }
 
 async function getBridgeStatus() {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1500);
-    try {
-        const response = await fetch(BRIDGE_READY_URL, { signal: controller.signal });
-        const payload = await response.json().catch(() => null);
-        if (response.ok && payload && payload.ready === true) {
-            return { state: 'ready', label: 'OCR local pronto' };
-        }
-        return { state: 'warming', label: 'Carregando o OCR' };
-    } catch {
-        return { state: 'offline', label: 'Bridge desconectado' };
-    } finally {
-        clearTimeout(timeoutId);
+    const status = await bridgeRuntime.checkStatus(1500);
+    if (status.ready) {
+        return { state: 'ready', label: 'OCR local pronto' };
     }
+    if (['probing', 'starting', 'warming'].includes(status.state)) {
+        return { state: 'warming', label: 'Carregando o OCR' };
+    }
+    return {
+        state: 'offline',
+        label: status.error ? 'Falha ao iniciar o OCR local' : 'Bridge desconectado'
+    };
 }
 
 function clampToastPosition(position, workArea, toastSize) {
@@ -1268,6 +1271,7 @@ app.whenReady().then(() => {
     if (process.platform === 'darwin' && app.dock) {
         app.dock.setIcon(APP_ICON_PATH);
     }
+    void bridgeRuntime.start();
     createSettingsWindow();
     createIntroWindow();
     for (const action of SHORTCUT_ACTIONS) {
@@ -1288,6 +1292,7 @@ app.on('will-quit', () => {
     stopFixedCapture();
     globalShortcut.unregisterAll();
     stopSideMouseShortcut();
+    bridgeRuntime.stop();
 });
 
 app.on('window-all-closed', () => {

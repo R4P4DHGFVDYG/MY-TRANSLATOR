@@ -50,17 +50,13 @@ npm ci
 
 ## Como iniciar
 
-Abra um PowerShell na pasta `bridge`:
-
-```powershell
-.\.venv\Scripts\python.exe -m hq_ocr_bridge
-```
-
-Deixe essa janela aberta. Depois, abra outro PowerShell na pasta `electron_client`:
+Abra um PowerShell na pasta `electron_client`:
 
 ```powershell
 npm start
 ```
+
+O aplicativo inicia o OCR local automaticamente e faz o aquecimento dos mecanismos durante a animação da aranha. Não é mais necessário manter um segundo PowerShell aberto.
 
 ## Como usar
 
@@ -79,5 +75,5 @@ Para melhor compatibilidade, use o jogo em **janela sem bordas**. Alguns jogos e
 ## Observações
 
 - O OCR funciona no computador, mas a tradução precisa de internet.
-- A primeira inicialização de alguns mecanismos OCR pode demorar um pouco.
+- A primeira inicialização de alguns mecanismos OCR pode demorar um pouco; o aquecimento começa junto com a animação de abertura.
 - Ainda não existe um instalador pronto; por enquanto, o aplicativo é iniciado pelos comandos acima.
