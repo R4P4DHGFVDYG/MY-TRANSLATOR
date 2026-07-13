@@ -3,8 +3,8 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 import math
 import re
-import string
 
+from .languages import language_base
 from .models import EngineResult
 
 
@@ -49,13 +49,15 @@ CONTRACTION_FIXES = {
 }
 
 
-def normalize_ocr_text(text: str) -> str:
+def normalize_ocr_text(text: str, language_tag: str | None = "en") -> str:
     if not text:
         return ""
 
     printable = "".join(ch if ch.isprintable() else " " for ch in text)
     normalized = printable.translate(SMART_PUNCTUATION)
     normalized = WHITESPACE_RE.sub(" ", normalized).strip()
+    if language_base(language_tag or "en") != "en":
+        return normalized
     normalized = _fix_comic_letter_confusions(normalized)
     normalized = _fix_contractions(normalized)
     normalized = _normalize_comic_case(normalized)
@@ -65,14 +67,18 @@ def normalize_ocr_text(text: str) -> str:
 
 
 def text_quality_score(
-    text: str, confidence: float | None, *, raw_text: str | None = None
+    text: str,
+    confidence: float | None,
+    *,
+    raw_text: str | None = None,
+    language_tag: str | None = "en",
 ) -> float:
-    normalized = normalize_ocr_text(text)
+    normalized = normalize_ocr_text(text, language_tag)
     if not normalized:
         return 0.0
 
     chars = list(normalized)
-    printable_count = sum(1 for ch in chars if ch in string.printable)
+    printable_count = sum(1 for ch in chars if ch.isprintable())
     content_count = sum(1 for ch in chars if ch.isalnum())
     accepted_count = sum(
         1 for ch in chars if ch.isalnum() or ch.isspace() or ch in ".,!?;:'\"-()[]"
@@ -84,6 +90,11 @@ def text_quality_score(
     content_ratio = content_count / len(chars)
     length_bonus = min(len(normalized) / 80, 1.0)
     word_bonus = min(len(words) / 8, 1.0)
+    if (
+        language_base(language_tag or "en") in {"ja", "ko", "zh"}
+        and len(words) <= 1
+    ):
+        word_bonus = max(word_bonus, min(content_count / 8, 1.0))
     confidence = _bounded_optional_number(confidence)
     visual_score = (
         printable_ratio * 0.1
@@ -128,14 +139,10 @@ def ocr_suspicion_score(text: str) -> float:
         for token in tokens
         if not token.islower()
     )
-    unexpected_letters = sum(
-        1 for ch in normalized if ch.isalpha() and ch not in string.ascii_letters
-    )
     very_long_tokens = sum(1 for token in tokens if len(token) >= 20)
 
     penalty = min(0.24, likely_digit_confusions * 0.12)
     penalty += min(0.18, embedded_slashes * 0.12)
-    penalty += min(0.12, unexpected_letters * 0.06)
     penalty += min(0.08, very_long_tokens * 0.04)
     return round(_clamp(penalty, 0.0, 0.45), 4)
 
@@ -155,8 +162,13 @@ def rank_ocr_results(
     primary_engine: str | None = None,
     accept_score: float = 0.8,
     accept_confidence: float = 0.78,
+    language_tag: str | None = "en",
 ) -> EngineResult | None:
-    candidates = [result for result in results if normalize_ocr_text(result.text)]
+    candidates = [
+        result
+        for result in results
+        if normalize_ocr_text(result.text, language_tag)
+    ]
     if not candidates:
         return None
 
@@ -165,7 +177,8 @@ def rank_ocr_results(
         result.raw_confidence = _bounded_optional_number(result.raw_confidence)
 
     normalized_texts = {
-        id(result): normalize_ocr_text(result.text).lower() for result in candidates
+        id(result): normalize_ocr_text(result.text, language_tag).casefold()
+        for result in candidates
     }
     exact_consensus = _exact_cross_engine_consensus(
         candidates,

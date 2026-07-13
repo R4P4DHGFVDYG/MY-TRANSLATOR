@@ -131,6 +131,60 @@ def test_source_language_is_forwarded_to_windows_ocr():
     ]
 
 
+def test_multilingual_codes_are_canonicalized_for_ocr_and_translation():
+    ocr_service = LanguageAwareOcrService()
+    translator = ResultTranslator()
+    app = create_app(
+        BridgeConfig(),
+        ocr_service=ocr_service,
+        translator=translator,
+    )
+
+    response = app.test_client().post(
+        "/v1/translate-selection",
+        json={
+            "imageDataUrl": _png_data_url(),
+            "selection": {"x": 0, "y": 0, "width": 20, "height": 20},
+            "viewport": {"width": 20, "height": 20},
+            "source": "zh-Hant",
+            "target": "ja-JP",
+            "engines": ["windowsocr"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert ocr_service.requests == [
+        {"engines": ["windowsocr"], "languageTag": "zh-TW"}
+    ]
+    assert translator.requests == [
+        {"text": "HELLO WORLD", "source": "zh-TW", "target": "ja"}
+    ]
+
+
+def test_unsupported_language_is_rejected_before_ocr():
+    ocr_service = LanguageAwareOcrService()
+    app = create_app(
+        BridgeConfig(),
+        ocr_service=ocr_service,
+        translator=ResultTranslator(),
+    )
+
+    response = app.test_client().post(
+        "/v1/translate-selection",
+        json={
+            "imageDataUrl": _png_data_url(),
+            "selection": {"x": 0, "y": 0, "width": 20, "height": 20},
+            "viewport": {"width": 20, "height": 20},
+            "source": "unknown",
+            "target": "en",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "unsupported language code" in response.get_json()["error"]
+    assert ocr_service.requests == []
+
+
 def test_pixel_art_preprocessing_profile_reaches_ocr_service():
     ocr_service = LanguageAwareOcrService()
     app = create_app(

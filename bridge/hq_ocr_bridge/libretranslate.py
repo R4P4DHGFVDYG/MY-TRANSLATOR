@@ -197,8 +197,8 @@ class LibreTranslateClient:
                 self.config.deepl_api_url,
                 data={
                     "text": text,
-                    "source_lang": _deepl_lang(source),
-                    "target_lang": _deepl_lang(target),
+                    "source_lang": _deepl_source_lang(source),
+                    "target_lang": _deepl_target_lang(target),
                 },
                 headers={"Authorization": f"DeepL-Auth-Key {self.config.deepl_auth_key}"},
                 timeout=self.config.request_timeout_seconds,
@@ -229,8 +229,8 @@ class LibreTranslateClient:
                 f"{self.base_url}/translate",
                 json={
                     "q": text,
-                    "source": source,
-                    "target": target,
+                    "source": _libretranslate_lang(source),
+                    "target": _libretranslate_lang(target),
                     "format": "text",
                 },
                 timeout=self.config.request_timeout_seconds,
@@ -287,8 +287,28 @@ def _google_lang(value: str) -> str:
     return "pt-BR" if normalized.lower() in {"pt", "pt-br"} else normalized
 
 
-def _deepl_lang(value: str) -> str:
-    normalized = value.strip().upper().replace("-", "_")
+def _deepl_source_lang(value: str) -> str:
+    normalized = value.strip().upper().replace("_", "-")
+    if normalized.startswith(("EN-", "PT-", "ZH-")):
+        return normalized.split("-", 1)[0]
+    return normalized
+
+
+def _deepl_target_lang(value: str) -> str:
+    normalized = value.strip().upper().replace("_", "-")
     if normalized == "PT":
         return "PT-BR"
-    return normalized.replace("_", "-")
+    if normalized == "ZH-CN":
+        return "ZH-HANS"
+    if normalized == "ZH-TW":
+        return "ZH-HANT"
+    return normalized
+
+
+def _libretranslate_lang(value: str) -> str:
+    normalized = value.strip()
+    if normalized.lower() in {"pt", "pt-br"}:
+        return "pt"
+    if normalized.lower() in {"zh", "zh-cn", "zh-tw"}:
+        return "zh"
+    return normalized.lower()

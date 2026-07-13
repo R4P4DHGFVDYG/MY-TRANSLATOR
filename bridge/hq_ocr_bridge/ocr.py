@@ -281,6 +281,7 @@ class OcrService:
                 ),
                 accept_score=self.config.ocr_accept_score,
                 accept_confidence=self.config.ocr_accept_confidence,
+                language_tag=language_tag,
             )
             cached_detection = _copy_detection((best, results, warnings))
             self._cache.set(cache_key, cached_detection)
@@ -320,6 +321,7 @@ class OcrService:
                 normalized_engine,
                 engine_results,
                 available_variants=len(engine_variants),
+                language_tag=language_tag,
             ):
                 break
 
@@ -371,7 +373,7 @@ class OcrService:
             )
             _raise_if_cancelled(cancel_check)
 
-            if self._automatic_fast_result_is_conclusive(results):
+            if self._automatic_fast_result_is_conclusive(results, language_tag):
                 return results, warnings
 
         paddle_variants = preprocess_variants_for_ocr(
@@ -391,12 +393,14 @@ class OcrService:
         return results, warnings
 
     def _automatic_fast_result_is_conclusive(
-        self, results: list[EngineResult]
+        self,
+        results: list[EngineResult],
+        language_tag: str | None = "en",
     ) -> bool:
         clusters: dict[str, list[EngineResult]] = {}
         for result in results:
             base_engine = _base_engine(result.engine)
-            normalized = normalize_ocr_text(result.text).casefold()
+            normalized = normalize_ocr_text(result.text, language_tag).casefold()
             if base_engine in AUTOMATIC_FAST_ENGINES and normalized:
                 clusters.setdefault(normalized, []).append(result)
 
@@ -407,7 +411,7 @@ class OcrService:
             >= set(AUTOMATIC_FAST_ENGINES)
         ]
         for cluster in consensus:
-            consensus_text = normalize_ocr_text(cluster[0].text)
+            consensus_text = normalize_ocr_text(cluster[0].text, language_tag)
             if len(consensus_text) < 2 or not any(
                 ch.isalnum() for ch in consensus_text
             ):
@@ -422,16 +426,20 @@ class OcrService:
             result
             for result in results
             if _base_engine(result.engine) == "tesseract"
-            and normalize_ocr_text(result.text)
+            and normalize_ocr_text(result.text, language_tag)
         ]
         windows_results = [
             result
             for result in results
             if _base_engine(result.engine) == "windowsocr"
-            and normalize_ocr_text(result.text)
+            and normalize_ocr_text(result.text, language_tag)
         ]
         return any(
-            self._automatic_fast_pair_is_conclusive(tesseract, windows)
+            self._automatic_fast_pair_is_conclusive(
+                tesseract,
+                windows,
+                language_tag,
+            )
             for tesseract in tesseract_results
             for windows in windows_results
         )
@@ -440,6 +448,7 @@ class OcrService:
         self,
         tesseract: EngineResult,
         windows: EngineResult,
+        language_tag: str | None = "en",
     ) -> bool:
         if (
             not self._is_reliable_result(tesseract)
@@ -452,8 +461,8 @@ class OcrService:
         ):
             return False
 
-        tesseract_text = _automatic_consensus_key(tesseract.text)
-        windows_text = _automatic_consensus_key(windows.text)
+        tesseract_text = _automatic_consensus_key(tesseract.text, language_tag)
+        windows_text = _automatic_consensus_key(windows.text, language_tag)
         if not tesseract_text or not windows_text:
             return False
         if tesseract_text == windows_text:
@@ -625,11 +634,12 @@ class OcrService:
 
             result.engine = f"{normalized_engine}:{variant_name}"
             result.raw_text = result.text
-            result.text = normalize_ocr_text(result.text)
+            result.text = normalize_ocr_text(result.text, language_tag)
             result.score = text_quality_score(
                 result.text,
                 result.raw_confidence,
                 raw_text=result.raw_text,
+                language_tag=language_tag,
             )
             results.append(result)
             if (
@@ -640,9 +650,9 @@ class OcrService:
                 if normalized_engine != "tesseract" or len(engine_variants) == 1:
                     break
                 texts = [
-                    normalize_ocr_text(candidate.text).casefold()
+                    normalize_ocr_text(candidate.text, language_tag).casefold()
                     for candidate in results
-                    if normalize_ocr_text(candidate.text)
+                    if normalize_ocr_text(candidate.text, language_tag)
                 ]
                 if len(texts) >= 2 and len(set(texts)) == 1:
                     break
@@ -663,8 +673,9 @@ class OcrService:
         results: list[EngineResult],
         *,
         available_variants: int,
+        language_tag: str | None = "en",
     ) -> bool:
-        best = rank_ocr_results(results)
+        best = rank_ocr_results(results, language_tag=language_tag)
         if not self._is_reliable_result(best):
             return False
         if engine != "tesseract":
@@ -672,9 +683,9 @@ class OcrService:
 
         required = min(2, available_variants)
         texts = [
-            normalize_ocr_text(result.text).casefold()
+            normalize_ocr_text(result.text, language_tag).casefold()
             for result in results
-            if normalize_ocr_text(result.text)
+            if normalize_ocr_text(result.text, language_tag)
         ]
         return len(texts) >= required and len(set(texts)) == 1
 
@@ -1071,8 +1082,10 @@ def _automatic_engine_has_terminal_failure(
     return False
 
 
-def _automatic_consensus_key(text: str) -> str:
-    normalized = normalize_ocr_text(text).casefold()
+def _automatic_consensus_key(
+    text: str, language_tag: str | None = "en"
+) -> str:
+    normalized = normalize_ocr_text(text, language_tag).casefold()
     characters = [
         character
         for character in normalized

@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { languageOptions } = require('./language_catalog');
 
 function subscribe(channel, callback) {
     const listener = (_event, payload) => callback(payload);
@@ -22,6 +23,7 @@ contextBridge.exposeInMainWorld('ocrDesktop', {
         getFixedAreaState: () => ipcRenderer.invoke('fixed-area-state'),
         onFixedAreaState: callback => subscribe('fixed-area-state', callback),
         getBridgeStatus: () => ipcRenderer.invoke('bridge-status'),
+        getLanguages: () => languageOptions(),
         getSystemFonts: () => ipcRenderer.invoke('system-fonts')
     },
     snip: {

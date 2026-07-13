@@ -16,3 +16,9 @@ def test_prepare_text_for_translation_handles_sentence_boundaries():
     assert prepare_text_for_translation("ROBIN-- JASON TODD. HAD BEEN ODD.") == (
         "Robin-- Jason todd. Had been odd."
     )
+
+
+def test_prepare_text_for_translation_does_not_apply_english_rules_to_other_languages():
+    assert prepare_text_for_translation("IM HAUS", "de") == "IM HAUS"
+    assert prepare_text_for_translation("ESTOU EM CASA", "pt-BR") == "ESTOU EM CASA"
+    assert prepare_text_for_translation("こんにちは世界", "ja") == "こんにちは世界"

@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import re
 
+from .languages import language_base
+
 
 WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 FIRST_ALPHA_RE = re.compile(r"[A-Za-z]")
 STANDALONE_I_RE = re.compile(r"\bi(?:'([a-z]+))?\b")
 
 
-def prepare_text_for_translation(text: str) -> str:
+def prepare_text_for_translation(text: str, language_tag: str = "en") -> str:
     stripped = text.strip()
+    if language_base(language_tag) != "en":
+        return stripped
     if not _looks_like_comic_caps(stripped):
         return stripped
 

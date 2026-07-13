@@ -17,6 +17,7 @@ from .image_utils import (
     image_from_data_url,
 )
 from .libretranslate import LibreTranslateClient, TranslationResult
+from .languages import normalize_language_code
 from .ocr import (
     OCR_PREPROCESSING_STANDARD,
     SUPPORTED_OCR_PREPROCESSING_PROFILES,
@@ -139,11 +140,10 @@ def create_app(
         try:
             engines = _requested_ocr_engines(payload, bridge_config)
             preprocessing_profile = _requested_ocr_preprocessing_profile(payload)
+            source = _language_code(payload.get("source") or "en")
+            target = _language_code(payload.get("target") or "pt-BR")
         except ValueError as exc:
             return _error_response(str(exc), 400)
-
-        source = _language_code(payload.get("source") or "en")
-        target = _language_code(payload.get("target") or "pt-BR")
 
         debug_capture: DebugCapture | None = None
         debug_warning = ""
@@ -221,7 +221,7 @@ def create_app(
 
         translation_started_at = perf_counter()
         try:
-            translation_source_text = prepare_text_for_translation(best.text)
+            translation_source_text = prepare_text_for_translation(best.text, source)
             translation = _translate(
                 translator_client,
                 translation_source_text,
@@ -463,8 +463,7 @@ def _error_response(message: str, status_code: int):
 
 
 def _language_code(value: Any) -> str:
-    code = str(value).strip()
-    return "pt-BR" if code.lower() in {"pt", "pt-br"} else code.lower()
+    return normalize_language_code(value)
 
 
 def _requested_ocr_engines(

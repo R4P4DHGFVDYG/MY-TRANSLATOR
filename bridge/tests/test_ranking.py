@@ -81,6 +81,21 @@ def test_normalize_ocr_text_preserves_real_id_and_ill_words():
     assert normalize_ocr_text("I FEEL ILL") == "I FEEL ILL"
 
 
+def test_non_english_normalization_preserves_language_specific_text():
+    assert normalize_ocr_text("IM HAUS", "de") == "IM HAUS"
+    assert normalize_ocr_text("AÇÃO NÃO", "pt-BR") == "AÇÃO NÃO"
+    assert normalize_ocr_text("Привет мир", "ru") == "Привет мир"
+
+
+def test_unicode_letters_are_not_treated_as_ocr_noise():
+    assert ocr_suspicion_score("AÇÃO NÃO") == 0
+    assert ocr_suspicion_score("Привет мир") == 0
+    assert ocr_suspicion_score("こんにちは世界") == 0
+    assert text_quality_score(
+        "こんにちは世界", None, language_tag="ja"
+    ) > 0.5
+
+
 def test_suspicious_ocr_artifacts_reduce_quality_even_with_high_confidence():
     clean = text_quality_score("THIS IS INTERESTING", 0.98)
     noisy = text_quality_score(

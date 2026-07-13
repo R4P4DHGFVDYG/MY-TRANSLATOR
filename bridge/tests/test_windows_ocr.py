@@ -11,6 +11,7 @@ from hq_ocr_bridge.windows_ocr import (
     WindowsOcrAdapter,
     _limit_image_size,
     _ordered_result_text,
+    _select_available_language_tag,
     _warm_up_worker,
     _worker_engine_for,
 )
@@ -124,3 +125,18 @@ def test_windows_ocr_limits_images_to_native_maximum_dimension():
         120,
         40,
     )
+
+
+def test_windows_ocr_selects_the_requested_chinese_script():
+    available = ["zh-Hant-TW", "zh-Hans-CN", "en-US"]
+
+    assert _select_available_language_tag("zh-CN", available) == "zh-Hans-CN"
+    assert _select_available_language_tag("zh-TW", available) == "zh-Hant-TW"
+
+
+def test_windows_ocr_language_selection_keeps_exact_and_base_fallbacks():
+    available = ["en-US", "pt-BR"]
+
+    assert _select_available_language_tag("pt-BR", available) == "pt-BR"
+    assert _select_available_language_tag("en", available) == "en-US"
+    assert _select_available_language_tag("ja", available) is None

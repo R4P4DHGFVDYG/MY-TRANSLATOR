@@ -11,6 +11,7 @@ const {
 } = require('./fixed_area');
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
 const { normalizeFontFamily, normalizeFontSize, normalizeTextAlign } = require('./appearance');
+const { LANGUAGE_CODES } = require('./language_catalog');
 const {
     OCR_ENGINES,
     resolveOcrEngines,
@@ -39,8 +40,8 @@ const INTRO_FALLBACK_MS = 5000;
 const RESULT_CACHE_CAPACITY = 64;
 const RESULT_CACHE_TTL_MS = 10 * 60 * 1000;
 const CLIENT_ID = randomUUID();
-const SOURCE_LANGUAGES = new Set(['en']);
-const TARGET_LANGUAGES = new Set(['pt-BR', 'en']);
+const SOURCE_LANGUAGES = LANGUAGE_CODES;
+const TARGET_LANGUAGES = LANGUAGE_CODES;
 const TOAST_POSITIONS = new Set(['custom', 'mouse', 'top', 'bottom', 'center']);
 const SHORTCUT_ACTIONS = new Set(['fixed', 'temporary', 'stop']);
 const FALLBACK_SYSTEM_FONTS = ['Segoe UI', 'Arial', 'Calibri', 'Tahoma', 'Verdana', 'Georgia', 'Consolas'];

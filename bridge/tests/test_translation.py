@@ -131,6 +131,37 @@ def test_deepl_is_used_first_with_key(monkeypatch):
     assert result.warnings == ()
 
 
+def test_deepl_maps_chinese_source_and_target_variants(monkeypatch):
+    def fake_post(url, data=None, json=None, headers=None, timeout=None):
+        assert data["source_lang"] == "ZH"
+        assert data["target_lang"] == "ZH-HANT"
+        return FakeResponse({"translations": [{"text": "繁體中文"}]})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = LibreTranslateClient(
+        BridgeConfig(
+            translation_providers=("deepl",),
+            deepl_auth_key="test-key",
+        )
+    )
+
+    assert client.translate("简体中文", "zh-CN", "zh-TW") == "繁體中文"
+
+
+def test_libretranslate_uses_base_codes_for_regional_languages(monkeypatch):
+    def fake_post(url, data=None, json=None, headers=None, timeout=None):
+        assert json["source"] == "pt"
+        assert json["target"] == "zh"
+        return FakeResponse({"translatedText": "你好"})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = LibreTranslateClient(
+        BridgeConfig(translation_providers=("libretranslate",))
+    )
+
+    assert client.translate("Olá", "pt-BR", "zh-CN") == "你好"
+
+
 def test_pt_alias_is_normalized_to_brazilian_portuguese(monkeypatch):
     def fake_get(url, params, timeout):
         assert params["tl"] == "pt-BR"

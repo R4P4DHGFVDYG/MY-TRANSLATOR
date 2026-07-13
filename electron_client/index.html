@@ -781,6 +781,7 @@
     <script>
         const desktopApi = window.ocrDesktop;
         const OCR_STORAGE_KEY = 'grc-translator-ocr-engine-v2';
+        const LANGUAGE_STORAGE_KEY = 'grc-translator-languages';
         const APPEARANCE_STORAGE_KEY = 'grc-translator-appearance';
         const shortcutConfigs = {
             fixed: {
@@ -895,6 +896,42 @@
             }
         }
 
+        function loadLanguageOptions() {
+            const languages = desktopApi.settings.getLanguages();
+            if (!Array.isArray(languages) || languages.length === 0) {
+                return;
+            }
+
+            let stored = {};
+            try {
+                const parsed = JSON.parse(localStorage.getItem(LANGUAGE_STORAGE_KEY));
+                if (parsed && typeof parsed === 'object') {
+                    stored = parsed;
+                }
+            } catch {
+                // The validated defaults remain selected.
+            }
+
+            const defaults = { source: 'en', target: 'pt-BR' };
+            for (const id of ['source', 'target']) {
+                const select = document.getElementById(id);
+                select.replaceChildren();
+                for (const language of languages) {
+                    if (!language || typeof language.code !== 'string' || typeof language.label !== 'string') {
+                        continue;
+                    }
+                    const option = document.createElement('option');
+                    option.value = language.code;
+                    option.textContent = language.label;
+                    select.appendChild(option);
+                }
+                const requested = typeof stored[id] === 'string' ? stored[id] : defaults[id];
+                select.value = [...select.options].some(option => option.value === requested)
+                    ? requested
+                    : defaults[id];
+            }
+        }
+
         async function loadSystemFonts() {
             const select = document.getElementById('fontFamily');
             try {
@@ -1004,6 +1041,10 @@
             updateOcrHint(ocrEngine);
             try {
                 localStorage.setItem(OCR_STORAGE_KEY, ocrEngine);
+                localStorage.setItem(LANGUAGE_STORAGE_KEY, JSON.stringify({
+                    source: document.getElementById('source').value,
+                    target: document.getElementById('target').value
+                }));
                 localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({
                     position: document.getElementById('position').value,
                     fontFamily: document.getElementById('fontFamily').value,
@@ -1111,6 +1152,7 @@
         });
 
         async function initializeSettings() {
+            loadLanguageOptions();
             restoreOcrEngine();
             await loadSystemFonts();
             restoreAppearanceSettings();

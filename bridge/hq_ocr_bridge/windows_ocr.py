@@ -272,28 +272,71 @@ def _resolve_language_tag(language_tag: str) -> str:
         ) from exc
 
     requested = language_tag.strip()
-    requested_short = requested.split("-", 1)[0].lower()
     available = list(OcrEngine.available_recognizer_languages)
-    selected = next(
-        (item for item in available if item.language_tag.lower() == requested.lower()),
-        None,
+    selected_tag = _select_available_language_tag(
+        requested,
+        [item.language_tag for item in available],
     )
-    if selected is None:
-        selected = next(
-            (
-                item
-                for item in available
-                if item.language_tag.split("-", 1)[0].lower() == requested_short
-            ),
-            None,
-        )
-    if selected is None:
+    if selected_tag is None:
         installed = ", ".join(item.language_tag for item in available) or "none"
         raise RuntimeError(
             f"Windows OCR language '{requested}' is not installed "
             f"(available: {installed})"
         )
-    return selected.language_tag
+    return selected_tag
+
+
+def _select_available_language_tag(
+    requested: str,
+    available_tags: list[str],
+) -> str | None:
+    normalized = requested.strip().lower().replace("_", "-")
+    if not normalized:
+        return None
+
+    exact = next(
+        (tag for tag in available_tags if tag.lower().replace("_", "-") == normalized),
+        None,
+    )
+    if exact is not None:
+        return exact
+
+    requested_parts = normalized.split("-")
+    requested_base = requested_parts[0]
+    requested_script = _requested_chinese_script(requested_parts)
+    if requested_script is not None:
+        scripted = next(
+            (
+                tag
+                for tag in available_tags
+                if tag.lower().replace("_", "-").split("-")[0]
+                == requested_base
+                and requested_script
+                in tag.lower().replace("_", "-").split("-")[1:]
+            ),
+            None,
+        )
+        if scripted is not None:
+            return scripted
+
+    return next(
+        (
+            tag
+            for tag in available_tags
+            if tag.lower().replace("_", "-").split("-")[0] == requested_base
+        ),
+        None,
+    )
+
+
+def _requested_chinese_script(parts: list[str]) -> str | None:
+    if not parts or parts[0] != "zh":
+        return None
+    if any(part in {"hans", "cn", "sg"} for part in parts[1:]):
+        return "hans"
+    if any(part in {"hant", "tw", "hk", "mo"} for part in parts[1:]):
+        return "hant"
+    return None
 
 
 def _create_engine(language_tag: str) -> tuple[Any, str]:
