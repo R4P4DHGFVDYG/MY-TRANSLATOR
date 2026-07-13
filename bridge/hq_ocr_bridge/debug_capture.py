@@ -30,8 +30,10 @@ class DebugCapture:
         ocr_region = isolate_text_region(crop)
         ocr_region.save(self.directory / "ocr-region.png")
         preprocessing_profile = str(
-            payload.get("ocrPreprocessing") or "auto"
+            payload.get("ocrPreprocessing") or "standard"
         ).strip().lower()
+        if preprocessing_profile == "auto":
+            preprocessing_profile = "standard"
         variants = preprocess_variants_for_ocr(
             ocr_region,
             force_pixel_art=preprocessing_profile == "pixel-art",

@@ -597,6 +597,20 @@ def _variants_for_engine(
     if selected:
         return selected
 
+    if {"pixel", "pixel-soft"}.intersection(requested_variants):
+        available = preprocess_variants_for_ocr(
+            image,
+            engine=engine,
+            force_pixel_art=True,
+        )
+        selected = [
+            (name, variant)
+            for name, variant in available
+            if name in requested_variants
+        ]
+        if selected:
+            return selected
+
     available_names = ", ".join(name for name, _variant in available)
     requested_names = ", ".join(requested_variants)
     raise ValueError(

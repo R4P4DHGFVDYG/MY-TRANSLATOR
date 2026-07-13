@@ -18,7 +18,7 @@ from .image_utils import (
 )
 from .libretranslate import LibreTranslateClient, TranslationResult
 from .ocr import (
-    OCR_PREPROCESSING_AUTO,
+    OCR_PREPROCESSING_STANDARD,
     SUPPORTED_OCR_PREPROCESSING_PROFILES,
     OcrCancelledError,
     OcrCapacityError,
@@ -371,12 +371,12 @@ def _detect_text(
     engines: list[str],
     ticket: RequestTicket,
     language_tag: str | None = None,
-    preprocessing_profile: str = OCR_PREPROCESSING_AUTO,
+    preprocessing_profile: str = OCR_PREPROCESSING_STANDARD,
 ) -> tuple[Any, list[Any], list[str], dict[str, bool]]:
     detect_with_metadata = getattr(ocr, "detect_text_with_metadata", None)
     if callable(detect_with_metadata):
         optional_kwargs: dict[str, Any] = {}
-        if preprocessing_profile != OCR_PREPROCESSING_AUTO:
+        if preprocessing_profile != OCR_PREPROCESSING_STANDARD:
             optional_kwargs["preprocessing_profile"] = preprocessing_profile
         return detect_with_metadata(
             crop,
@@ -500,9 +500,9 @@ def _requested_ocr_engines(
 
 
 def _requested_ocr_preprocessing_profile(payload: dict[str, Any]) -> str:
-    requested = payload.get("ocrPreprocessing", OCR_PREPROCESSING_AUTO)
+    requested = payload.get("ocrPreprocessing", OCR_PREPROCESSING_STANDARD)
     if requested is None:
-        return OCR_PREPROCESSING_AUTO
+        return OCR_PREPROCESSING_STANDARD
     if not isinstance(requested, str) or not requested.strip():
         raise ValueError("ocrPreprocessing must be a non-empty string")
 
@@ -511,7 +511,7 @@ def _requested_ocr_preprocessing_profile(payload: dict[str, Any]) -> str:
         raise ValueError(
             f"unsupported OCR preprocessing profile: {requested}"
         )
-    return normalized
+    return OCR_PREPROCESSING_STANDARD if normalized == "auto" else normalized
 
 
 def _translate(

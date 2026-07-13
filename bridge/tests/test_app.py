@@ -33,10 +33,10 @@ class LanguageAwareOcrService(FakeOcrService):
         *,
         cancel_check,
         language_tag,
-        preprocessing_profile="auto",
+        preprocessing_profile="standard",
     ):
         request = {"engines": engines, "languageTag": language_tag}
-        if preprocessing_profile != "auto":
+        if preprocessing_profile != "standard":
             request["preprocessingProfile"] = preprocessing_profile
         self.requests.append(request)
         result = EngineResult("fake", "HELLO WORLD", 0.9, 0.9)
@@ -470,8 +470,8 @@ def test_debug_capture_writes_crop_and_metadata(tmp_path):
     assert (debug_dir / "ocr-region.png").exists()
     assert (debug_dir / "ocr-preprocessed.png").exists()
     assert (debug_dir / "ocr-preprocessed-standard.png").exists()
-    assert (debug_dir / "ocr-preprocessed-pixel.png").exists()
     assert (debug_dir / "ocr-preprocessed-binary.png").exists()
+    assert not (debug_dir / "ocr-preprocessed-pixel.png").exists()
     assert (debug_dir / "request.json").exists()
     assert (debug_dir / "response.json").exists()
     request_metadata = json.loads(

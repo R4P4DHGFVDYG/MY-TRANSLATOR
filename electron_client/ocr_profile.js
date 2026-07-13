@@ -15,7 +15,7 @@ function resolveOcrEngines(profile) {
 }
 
 function resolveOcrPreprocessing(profile) {
-    return profile === 'auto8bit' ? 'pixel-art' : 'auto';
+    return profile === 'auto8bit' ? 'pixel-art' : 'standard';
 }
 
 module.exports = { OCR_ENGINES, resolveOcrEngines, resolveOcrPreprocessing };

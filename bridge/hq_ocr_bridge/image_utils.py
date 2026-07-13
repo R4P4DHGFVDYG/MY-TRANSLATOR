@@ -116,9 +116,8 @@ def preprocess_variants_for_ocr(
     force_pixel_art: bool = False,
 ) -> list[tuple[str, Image.Image]]:
     normalized_engine = str(engine).strip().lower()
-    pixel_art = force_pixel_art or is_pixel_art_text(image)
     if normalized_engine == "windowsocr":
-        if pixel_art:
+        if force_pixel_art:
             return _limited_variants(_pixel_art_variants(image), max_variants)
 
         original = image if image.mode == "RGB" else image.convert("RGB")
@@ -137,7 +136,7 @@ def preprocess_variants_for_ocr(
         if max_variants == 1:
             return variants
 
-        if pixel_art:
+        if force_pixel_art:
             pixel_soft = dict(_pixel_art_variants(image))["pixel-soft"]
             variants.append(("pixel-soft", pixel_soft.convert("RGB")))
             return _limited_variants(variants, max_variants)
@@ -152,7 +151,7 @@ def preprocess_variants_for_ocr(
         variants.append(("binary", _binary_for_ocr(normalized)))
         return variants
 
-    if pixel_art:
+    if force_pixel_art:
         return _limited_variants(_pixel_art_variants(image), max_variants)
 
     gray = ImageOps.grayscale(image)
@@ -162,40 +161,8 @@ def preprocess_variants_for_ocr(
     if max_variants == 1:
         return variants
 
-    pixel = _upscale_pixel_text(normalized)
-    variants.append(("pixel", pixel))
-    if max_variants == 2:
-        return variants
-
     variants.append(("binary", _binary_for_ocr(normalized)))
     return variants
-
-
-def is_pixel_art_text(image: Image.Image) -> bool:
-    """Return whether an image has the limited, hard-edged palette of pixel text."""
-
-    if not isinstance(image, Image.Image) or image.width < 8 or image.height < 8:
-        return False
-
-    sample = image.convert("RGB")
-    sample.thumbnail(
-        (320, 180),
-        getattr(Image, "Resampling", Image).NEAREST,
-    )
-    colors = sample.getcolors(maxcolors=65)
-    if colors is None or len(colors) < 2 or len(colors) > 32:
-        return False
-
-    total_pixels = max(1, sample.width * sample.height)
-    dominant_pixels = sum(count for count, _color in sorted(colors, reverse=True)[:8])
-    luminances = [
-        (red * 299 + green * 587 + blue * 114) // 1000
-        for _count, (red, green, blue) in colors
-    ]
-    return (
-        max(luminances) - min(luminances) >= 90
-        and dominant_pixels / total_pixels >= 0.85
-    )
 
 
 def _pixel_art_variants(image: Image.Image) -> list[tuple[str, Image.Image]]:

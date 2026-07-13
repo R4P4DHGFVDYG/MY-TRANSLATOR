@@ -31,10 +31,10 @@ from .windows_ocr import WindowsOcrAdapter, windows_ocr_health
 DEFAULT_ENGINES = ["tesseract"]
 AUTOMATIC_PROFILE_ENGINES = ("tesseract", "windowsocr", "paddleocr")
 AUTOMATIC_FAST_ENGINES = ("tesseract", "windowsocr")
-OCR_PREPROCESSING_AUTO = "auto"
+OCR_PREPROCESSING_STANDARD = "standard"
 OCR_PREPROCESSING_PIXEL_ART = "pixel-art"
 SUPPORTED_OCR_PREPROCESSING_PROFILES = frozenset(
-    {OCR_PREPROCESSING_AUTO, OCR_PREPROCESSING_PIXEL_ART}
+    {"auto", OCR_PREPROCESSING_STANDARD, OCR_PREPROCESSING_PIXEL_ART}
 )
 AUTOMATIC_NEAR_CONSENSUS_MIN_LENGTH = 20
 AUTOMATIC_NEAR_CONSENSUS_SIMILARITY = 0.96
@@ -181,7 +181,7 @@ class OcrService:
         engines: list[str] | None = None,
         *,
         language_tag: str | None = None,
-        preprocessing_profile: str = OCR_PREPROCESSING_AUTO,
+        preprocessing_profile: str = OCR_PREPROCESSING_STANDARD,
     ) -> tuple[EngineResult | None, list[EngineResult], list[str]]:
         best, results, warnings, _metadata = self.detect_text_with_metadata(
             image,
@@ -198,7 +198,7 @@ class OcrService:
         *,
         cancel_check: Callable[[], bool] | None = None,
         language_tag: str | None = None,
-        preprocessing_profile: str = OCR_PREPROCESSING_AUTO,
+        preprocessing_profile: str = OCR_PREPROCESSING_STANDARD,
     ) -> tuple[EngineResult | None, list[EngineResult], list[str], dict[str, bool]]:
         requested = engines if engines is not None else list(self.config.default_ocr_engines)
         results: list[EngineResult] = []
@@ -1018,7 +1018,7 @@ def _normalize_preprocessing_profile(profile: str) -> str:
     normalized = str(profile).strip().lower()
     if normalized not in SUPPORTED_OCR_PREPROCESSING_PROFILES:
         raise ValueError(f"unsupported OCR preprocessing profile: {profile}")
-    return normalized
+    return OCR_PREPROCESSING_STANDARD if normalized == "auto" else normalized
 
 
 def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:

@@ -210,6 +210,10 @@ def test_automatic_profile_stops_after_first_variant_when_fast_engines_agree(
     assert best.text == "HELLO WORLD"
     assert calls == {"tesseract": 1, "windowsocr": 1, "paddleocr": 0}
     assert len(results) == 2
+    assert {result.engine for result in results} == {
+        "tesseract:standard",
+        "windowsocr:binary",
+    }
 
 
 def test_automatic_8_bit_profile_forces_pixel_variants_and_keeps_fast_consensus(
@@ -268,9 +272,14 @@ def test_ocr_cache_is_scoped_by_preprocessing_profile(monkeypatch):
     monkeypatch.setattr(service, "_run_tesseract", fake_tesseract)
     image = Image.new("RGB", (120, 40), "white")
 
-    _best, automatic_results, _warnings = service.detect_text(
+    _best, standard_results, _warnings = service.detect_text(
         image,
         ["tesseract"],
+    )
+    _best, legacy_auto_results, _warnings = service.detect_text(
+        image.copy(),
+        ["tesseract"],
+        preprocessing_profile="auto",
     )
     _best, pixel_results, _warnings = service.detect_text(
         image.copy(),
@@ -279,7 +288,10 @@ def test_ocr_cache_is_scoped_by_preprocessing_profile(monkeypatch):
     )
 
     assert calls == 2
-    assert [result.engine for result in automatic_results] == [
+    assert [result.engine for result in standard_results] == [
+        "tesseract:standard"
+    ]
+    assert [result.engine for result in legacy_auto_results] == [
         "tesseract:standard"
     ]
     assert [result.engine for result in pixel_results] == ["tesseract:pixel"]
@@ -626,7 +638,7 @@ def test_adaptive_engine_chain_skips_fallback_for_reliable_primary(monkeypatch):
     assert paddle_calls == 0
     assert [result.engine for result in results] == [
         "tesseract:standard",
-        "tesseract:pixel",
+        "tesseract:binary",
     ]
 
 
@@ -662,19 +674,19 @@ def test_adaptive_engine_chain_uses_fallback_when_tesseract_variants_disagree(
     assert paddle_calls == 1
     assert [result.engine for result in results] == [
         "tesseract:standard",
-        "tesseract:pixel",
+        "tesseract:binary",
         "paddleocr:standard",
     ]
 
 
-def test_tesseract_tries_binary_when_first_two_variants_disagree(monkeypatch):
-    service = OcrService(BridgeConfig(ocr_max_variants=3))
+def test_tesseract_tries_binary_after_standard_variant(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_max_variants=2))
     calls = 0
 
     def fake_tesseract(_image):
         nonlocal calls
         calls += 1
-        texts = ["S50 WHAT", "SO WHAT", "SO WHAT"]
+        texts = ["S50 WHAT", "SO WHAT"]
         return EngineResult("tesseract", texts[calls - 1], 0.95, 0.95)
 
     monkeypatch.setattr(service, "_run_tesseract", fake_tesseract)
@@ -686,10 +698,9 @@ def test_tesseract_tries_binary_when_first_two_variants_disagree(monkeypatch):
 
     assert warnings == []
     assert best is not None
-    assert calls == 3
+    assert calls == 2
     assert [result.engine for result in results] == [
         "tesseract:standard",
-        "tesseract:pixel",
         "tesseract:binary",
     ]
 

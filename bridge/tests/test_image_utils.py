@@ -10,7 +10,6 @@ from hq_ocr_bridge.image_utils import (
     ImagePayloadTooLarge,
     crop_visible_selection,
     image_from_data_url,
-    is_pixel_art_text,
     preprocess_variants_for_ocr,
 )
 
@@ -90,13 +89,13 @@ def test_crop_rejects_non_finite_and_oversized_selections():
         )
 
 
-def test_tesseract_preprocess_includes_pixel_and_adaptive_binary_variants():
+def test_tesseract_standard_preprocess_excludes_pixel_art_variants():
     image = Image.new("RGB", (120, 40), "white")
 
     variants = preprocess_variants_for_ocr(image)
     names = [name for name, _ in variants]
 
-    assert names == ["standard", "pixel", "binary"]
+    assert names == ["standard", "binary"]
     assert all(variant.width >= image.width for _, variant in variants)
 
 
@@ -134,12 +133,14 @@ def test_pixel_variant_normalizes_dark_background_to_black_text_on_white():
         for y in range(12, 28):
             image.putpixel((x, y), 255)
 
-    binary = dict(preprocess_variants_for_ocr(image))["pixel"]
+    binary = dict(
+        preprocess_variants_for_ocr(image, force_pixel_art=True)
+    )["pixel"]
 
     assert binary.getpixel((0, 0)) == 255
 
 
-def test_pixel_art_uses_nearest_neighbor_binary_and_soft_variants_first():
+def test_pixel_art_profile_uses_nearest_neighbor_binary_and_soft_variants():
     image = Image.new("RGB", (96, 32), "black")
     for x in range(12, 84, 12):
         for y in range(8, 24):
@@ -147,12 +148,11 @@ def test_pixel_art_uses_nearest_neighbor_binary_and_soft_variants_first():
                 image.putpixel((x, y), (255, 255, 255))
                 image.putpixel((x + 1, y), (255, 255, 255))
 
-    assert is_pixel_art_text(image) is True
-
     variants = preprocess_variants_for_ocr(
         image,
         max_variants=2,
         engine="tesseract",
+        force_pixel_art=True,
     )
 
     assert [name for name, _variant in variants] == ["pixel", "pixel-soft"]
@@ -161,7 +161,7 @@ def test_pixel_art_uses_nearest_neighbor_binary_and_soft_variants_first():
     assert variants[0][1].getpixel((0, 0)) == 255
 
 
-def test_neural_ocr_keeps_original_then_adds_pixel_soft_variant_for_pixel_art():
+def test_pixel_art_profile_keeps_original_then_adds_neural_soft_variant():
     image = Image.new("RGB", (96, 32), "black")
     for x in range(16, 80):
         for y in range(10, 22):
@@ -172,6 +172,7 @@ def test_neural_ocr_keeps_original_then_adds_pixel_soft_variant_for_pixel_art():
         image,
         max_variants=2,
         engine="paddleocr",
+        force_pixel_art=True,
     )
 
     assert [name for name, _variant in variants] == ["standard", "pixel-soft"]
@@ -179,30 +180,26 @@ def test_neural_ocr_keeps_original_then_adds_pixel_soft_variant_for_pixel_art():
     assert variants[1][1].mode == "RGB"
 
 
-def test_antialiased_gradient_is_not_classified_as_pixel_art():
-    image = Image.new("RGB", (96, 32))
-    for x in range(image.width):
-        shade = round(255 * x / (image.width - 1))
-        for y in range(image.height):
-            image.putpixel((x, y), (shade, shade, shade))
+def test_pixel_looking_image_stays_on_standard_profile_without_override():
+    image = Image.new("RGB", (96, 32), "black")
+    for x in range(12, 84, 12):
+        for y in range(8, 24):
+            image.putpixel((x, y), (255, 255, 255))
 
-    assert is_pixel_art_text(image) is False
     variants = preprocess_variants_for_ocr(
         image,
         max_variants=2,
         engine="tesseract",
     )
-    assert [name for name, _variant in variants] == ["standard", "pixel"]
+    assert [name for name, _variant in variants] == ["standard", "binary"]
 
 
-def test_pixel_art_profile_forces_8_bit_variants_when_detection_is_uncertain():
+def test_pixel_art_profile_forces_8_bit_variants():
     image = Image.new("RGB", (96, 32))
     for x in range(image.width):
         shade = round(255 * x / (image.width - 1))
         for y in range(image.height):
             image.putpixel((x, y), (shade, shade, shade))
-
-    assert is_pixel_art_text(image) is False
 
     tesseract_variants = preprocess_variants_for_ocr(
         image,

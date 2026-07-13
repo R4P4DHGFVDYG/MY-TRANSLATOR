@@ -8,9 +8,9 @@ test('automatic profile combines complementary OCR engines', () => {
 });
 
 test('8-bit automatic profile forces pixel-art preprocessing', () => {
-    assert.equal(resolveOcrPreprocessing('auto'), 'auto');
+    assert.equal(resolveOcrPreprocessing('auto'), 'standard');
     assert.equal(resolveOcrPreprocessing('auto8bit'), 'pixel-art');
-    assert.equal(resolveOcrPreprocessing('unknown'), 'auto');
+    assert.equal(resolveOcrPreprocessing('unknown'), 'standard');
 });
 
 test('individual OCR profiles request only their selected engine', () => {
