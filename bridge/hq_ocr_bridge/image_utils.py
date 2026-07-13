@@ -115,7 +115,11 @@ def preprocess_variants_for_ocr(
     engine: str = "tesseract",
 ) -> list[tuple[str, Image.Image]]:
     normalized_engine = str(engine).strip().lower()
+    pixel_art = is_pixel_art_text(image)
     if normalized_engine == "windowsocr":
+        if pixel_art:
+            return _limited_variants(_pixel_art_variants(image), max_variants)
+
         original = image if image.mode == "RGB" else image.convert("RGB")
         gray = ImageOps.grayscale(image)
         normalized = ImageOps.autocontrast(gray)
@@ -132,6 +136,11 @@ def preprocess_variants_for_ocr(
         if max_variants == 1:
             return variants
 
+        if pixel_art:
+            pixel_soft = dict(_pixel_art_variants(image))["pixel-soft"]
+            variants.append(("pixel-soft", pixel_soft.convert("RGB")))
+            return _limited_variants(variants, max_variants)
+
         gray = ImageOps.grayscale(image)
         normalized = ImageOps.autocontrast(gray, cutoff=1)
         contrast = _upscale_for_ocr(normalized.filter(ImageFilter.SHARPEN))
@@ -141,6 +150,9 @@ def preprocess_variants_for_ocr(
 
         variants.append(("binary", _binary_for_ocr(normalized)))
         return variants
+
+    if pixel_art:
+        return _limited_variants(_pixel_art_variants(image), max_variants)
 
     gray = ImageOps.grayscale(image)
     normalized = ImageOps.autocontrast(gray)
@@ -155,6 +167,65 @@ def preprocess_variants_for_ocr(
         return variants
 
     variants.append(("binary", _binary_for_ocr(normalized)))
+    return variants
+
+
+def is_pixel_art_text(image: Image.Image) -> bool:
+    """Return whether an image has the limited, hard-edged palette of pixel text."""
+
+    if not isinstance(image, Image.Image) or image.width < 8 or image.height < 8:
+        return False
+
+    sample = image.convert("RGB")
+    sample.thumbnail(
+        (320, 180),
+        getattr(Image, "Resampling", Image).NEAREST,
+    )
+    colors = sample.getcolors(maxcolors=65)
+    if colors is None or len(colors) < 2 or len(colors) > 32:
+        return False
+
+    total_pixels = max(1, sample.width * sample.height)
+    dominant_pixels = sum(count for count, _color in sorted(colors, reverse=True)[:8])
+    luminances = [
+        (red * 299 + green * 587 + blue * 114) // 1000
+        for _count, (red, green, blue) in colors
+    ]
+    return (
+        max(luminances) - min(luminances) >= 90
+        and dominant_pixels / total_pixels >= 0.85
+    )
+
+
+def _pixel_art_variants(image: Image.Image) -> list[tuple[str, Image.Image]]:
+    gray = ImageOps.grayscale(image)
+    normalized = ImageOps.autocontrast(gray)
+    binary = _pad_for_ocr(_binary_for_ocr(normalized))
+
+    soft = _normalize_text_polarity(normalized)
+    soft = _upscale_pixel_text(soft)
+    soft = soft.filter(ImageFilter.GaussianBlur(radius=0.45))
+    soft = _pad_for_ocr(ImageOps.autocontrast(soft))
+    return [("pixel", binary), ("pixel-soft", soft)]
+
+
+def _normalize_text_polarity(image: Image.Image) -> Image.Image:
+    histogram = image.histogram()[:256]
+    dark_pixels = sum(histogram[:96])
+    light_pixels = sum(histogram[160:])
+    return ImageOps.invert(image) if dark_pixels > light_pixels else image
+
+
+def _pad_for_ocr(image: Image.Image) -> Image.Image:
+    border = max(8, min(32, round(image.height * 0.06)))
+    return ImageOps.expand(image, border=border, fill=255)
+
+
+def _limited_variants(
+    variants: list[tuple[str, Image.Image]], max_variants: int
+) -> list[tuple[str, Image.Image]]:
+    if max_variants > 0:
+        return variants[:max_variants]
     return variants
 
 

@@ -226,7 +226,7 @@ def parse_args() -> argparse.Namespace:
         default=",".join(DEFAULT_VARIANTS),
         help=(
             "Comma-separated preprocess variants: "
-            "standard,pixel,contrast,binary."
+            "standard,pixel,pixel-soft,contrast,binary."
         ),
     )
     parser.add_argument(
@@ -299,7 +299,7 @@ def load_ground_truth(path: Path) -> dict[str, str]:
 
 def parse_variants(value: str) -> list[str]:
     variants = [item.strip().lower() for item in value.split(",") if item.strip()]
-    allowed = {"standard", "pixel", "contrast", "binary"}
+    allowed = {"standard", "pixel", "pixel-soft", "contrast", "binary"}
     unknown = sorted(set(variants) - allowed)
     if unknown:
         raise ValueError(f"Unknown variants: {', '.join(unknown)}")

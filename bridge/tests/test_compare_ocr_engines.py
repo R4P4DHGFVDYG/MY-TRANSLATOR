@@ -60,9 +60,10 @@ def test_calculate_error_metrics_reports_cer_wer_and_exact_match():
 
 
 def test_parse_variants_accepts_production_names_and_rejects_soft():
-    assert parse_variants("standard,pixel,contrast,binary") == [
+    assert parse_variants("standard,pixel,pixel-soft,contrast,binary") == [
         "standard",
         "pixel",
+        "pixel-soft",
         "contrast",
         "binary",
     ]

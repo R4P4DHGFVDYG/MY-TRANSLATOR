@@ -10,6 +10,7 @@ from hq_ocr_bridge.image_utils import (
     ImagePayloadTooLarge,
     crop_visible_selection,
     image_from_data_url,
+    is_pixel_art_text,
     preprocess_variants_for_ocr,
 )
 
@@ -127,12 +128,68 @@ def test_windows_ocr_receives_binary_then_original_variant():
     assert variants[1][1] is image
 
 
-def test_binary_variant_normalizes_dark_background_to_black_text_on_white():
+def test_pixel_variant_normalizes_dark_background_to_black_text_on_white():
     image = Image.new("L", (100, 40), 0)
     for x in range(30, 70):
         for y in range(12, 28):
             image.putpixel((x, y), 255)
 
-    binary = dict(preprocess_variants_for_ocr(image))["binary"]
+    binary = dict(preprocess_variants_for_ocr(image))["pixel"]
 
     assert binary.getpixel((0, 0)) == 255
+
+
+def test_pixel_art_uses_nearest_neighbor_binary_and_soft_variants_first():
+    image = Image.new("RGB", (96, 32), "black")
+    for x in range(12, 84, 12):
+        for y in range(8, 24):
+            if x <= 80:
+                image.putpixel((x, y), (255, 255, 255))
+                image.putpixel((x + 1, y), (255, 255, 255))
+
+    assert is_pixel_art_text(image) is True
+
+    variants = preprocess_variants_for_ocr(
+        image,
+        max_variants=2,
+        engine="tesseract",
+    )
+
+    assert [name for name, _variant in variants] == ["pixel", "pixel-soft"]
+    assert all(variant.mode == "L" for _name, variant in variants)
+    assert all(variant.width > image.width for _name, variant in variants)
+    assert variants[0][1].getpixel((0, 0)) == 255
+
+
+def test_neural_ocr_keeps_original_then_adds_pixel_soft_variant_for_pixel_art():
+    image = Image.new("RGB", (96, 32), "black")
+    for x in range(16, 80):
+        for y in range(10, 22):
+            if x % 8 in {0, 1} or y in {10, 21}:
+                image.putpixel((x, y), (255, 255, 255))
+
+    variants = preprocess_variants_for_ocr(
+        image,
+        max_variants=2,
+        engine="paddleocr",
+    )
+
+    assert [name for name, _variant in variants] == ["standard", "pixel-soft"]
+    assert variants[0][1] is image
+    assert variants[1][1].mode == "RGB"
+
+
+def test_antialiased_gradient_is_not_classified_as_pixel_art():
+    image = Image.new("RGB", (96, 32))
+    for x in range(image.width):
+        shade = round(255 * x / (image.width - 1))
+        for y in range(image.height):
+            image.putpixel((x, y), (shade, shade, shade))
+
+    assert is_pixel_art_text(image) is False
+    variants = preprocess_variants_for_ocr(
+        image,
+        max_variants=2,
+        engine="tesseract",
+    )
+    assert [name for name, _variant in variants] == ["standard", "pixel"]
