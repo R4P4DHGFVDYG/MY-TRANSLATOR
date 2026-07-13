@@ -608,11 +608,12 @@
                         <label for="ocrEngine">OCR utilizado</label>
                         <select id="ocrEngine">
                             <option value="auto" selected>Automático — recomendado</option>
+                            <option value="windowsocr">Windows OCR — Nativo e rápido</option>
                             <option value="tesseract">Tesseract — Windows</option>
                             <option value="paddleocr">PaddleOCR — Inteligência artificial</option>
                             <option value="easyocr">EasyOCR — Alternativo</option>
                         </select>
-                        <div class="field-help" id="ocrEngineHint">Usa Tesseract primeiro e consulta o PaddleOCR somente quando a leitura estiver incerta.</div>
+                        <div class="field-help" id="ocrEngineHint">Usa Tesseract primeiro e consulta Windows OCR e PaddleOCR somente quando a leitura estiver incerta.</div>
                     </div>
                 </div>
                     </section>
@@ -794,7 +795,7 @@
                 defaultShortcut: { type: 'keyboard', value: 'Ctrl+Shift+E' }
             }
         };
-        const allowedOcrEngines = new Set(['auto', 'tesseract', 'paddleocr', 'easyocr']);
+        const allowedOcrEngines = new Set(['auto', 'windowsocr', 'tesseract', 'paddleocr', 'easyocr']);
         const settingIds = [
             'source', 'target', 'ocrEngine', 'position', 'fontFamily', 'fontSize',
             'textAlign', 'textColor', 'bgColor', 'opacity'
@@ -956,7 +957,8 @@
 
         function updateOcrHint(engine) {
             const hints = {
-                auto: 'Usa Tesseract primeiro e consulta o PaddleOCR somente quando a leitura estiver incerta.',
+                auto: 'Usa Tesseract primeiro e consulta Windows OCR e PaddleOCR somente quando a leitura estiver incerta.',
+                windowsocr: 'Windows OCR é nativo, rápido e usa o pacote de idioma instalado no sistema.',
                 tesseract: 'Tesseract inicia mais rápido e funciona bem com fontes pixeladas.',
                 paddleocr: 'PaddleOCR pode reconhecer fontes difíceis, mas o primeiro uso demora mais.',
                 easyocr: 'EasyOCR é uma alternativa mais lenta para comparar resultados.'

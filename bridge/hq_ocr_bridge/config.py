@@ -80,7 +80,12 @@ class BridgeConfig:
     translation_cache_capacity: int = 128
     translation_cache_ttl_seconds: float = 900.0
     default_ocr_engines: tuple[str, ...] = ("tesseract",)
-    allowed_ocr_engines: tuple[str, ...] = ("paddleocr", "easyocr", "tesseract")
+    allowed_ocr_engines: tuple[str, ...] = (
+        "windowsocr",
+        "paddleocr",
+        "easyocr",
+        "tesseract",
+    )
     max_ocr_engines: int = 3
     force_ocr_engines: bool = False
     ocr_engine_timeout_seconds: float = 0.0
@@ -107,6 +112,7 @@ class BridgeConfig:
     paddleocr_model_source: str = "bos"
     paddleocr_enable_mkldnn: bool = False
     paddleocr_max_pixels: int = 1_500_000
+    windows_ocr_lang: str = "en-US"
     tesseract_lang: str = "eng"
     max_request_bytes: int = 17 * 1024 * 1024
     max_image_bytes: int = 12 * 1024 * 1024
@@ -122,7 +128,12 @@ class BridgeConfig:
         allowed_engines = _unique_lower(self.allowed_ocr_engines)
         if not allowed_engines:
             raise ValueError("allowed_ocr_engines must not be empty")
-        unknown_allowed = set(allowed_engines) - {"easyocr", "paddleocr", "tesseract"}
+        unknown_allowed = set(allowed_engines) - {
+            "windowsocr",
+            "easyocr",
+            "paddleocr",
+            "tesseract",
+        }
         if unknown_allowed:
             raise ValueError(
                 "allowed_ocr_engines contains unsupported engines: "
@@ -142,6 +153,8 @@ class BridgeConfig:
             raise ValueError("paddleocr_lang must not be empty")
         if not self.paddleocr_ocr_version.strip():
             raise ValueError("paddleocr_ocr_version must not be empty")
+        if not self.windows_ocr_lang.strip():
+            raise ValueError("windows_ocr_lang must not be empty")
 
         detection_model = _normalized_optional(self.paddleocr_detection_model)
         recognition_model = _normalized_optional(self.paddleocr_recognition_model)
@@ -306,6 +319,9 @@ class BridgeConfig:
             ),
             paddleocr_max_pixels=_int_from_env(
                 "HQ_OCR_PADDLEOCR_MAX_PIXELS", cls.paddleocr_max_pixels
+            ),
+            windows_ocr_lang=os.getenv(
+                "HQ_OCR_WINDOWS_LANG", cls.windows_ocr_lang
             ),
             tesseract_lang=os.getenv("HQ_OCR_TESSERACT_LANG", cls.tesseract_lang),
             max_request_bytes=_int_from_env(

@@ -156,6 +156,7 @@ def create_app(
                 crop,
                 engines,
                 ticket,
+                source,
             )
         except OcrCancelledError:
             timings["ocrMs"] = _elapsed_ms(ocr_started_at)
@@ -360,6 +361,7 @@ def _detect_text(
     crop: Any,
     engines: list[str],
     ticket: RequestTicket,
+    language_tag: str | None = None,
 ) -> tuple[Any, list[Any], list[str], dict[str, bool]]:
     detect_with_metadata = getattr(ocr, "detect_text_with_metadata", None)
     if callable(detect_with_metadata):
@@ -367,6 +369,7 @@ def _detect_text(
             crop,
             engines,
             cancel_check=lambda: not ticket.is_current(),
+            language_tag=language_tag,
         )
 
     best, engine_results, warnings = ocr.detect_text(crop, engines)

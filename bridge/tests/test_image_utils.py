@@ -113,6 +113,20 @@ def test_neural_ocr_receives_original_rgb_before_contrast_variants():
     assert variants[0][1].mode == "RGB"
 
 
+def test_windows_ocr_receives_binary_then_original_variant():
+    image = Image.new("RGB", (120, 40), "white")
+
+    variants = preprocess_variants_for_ocr(
+        image,
+        max_variants=2,
+        engine="windowsocr",
+    )
+
+    assert [name for name, _variant in variants] == ["binary", "standard"]
+    assert variants[0][1].mode == "L"
+    assert variants[1][1] is image
+
+
 def test_binary_variant_normalizes_dark_background_to_black_text_on_white():
     image = Image.new("L", (100, 40), 0)
     for x in range(30, 70):

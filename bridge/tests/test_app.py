@@ -25,6 +25,22 @@ class FakeOcrService:
         return result, [result], []
 
 
+class LanguageAwareOcrService(FakeOcrService):
+    def detect_text_with_metadata(
+        self,
+        image,
+        engines,
+        *,
+        cancel_check,
+        language_tag,
+    ):
+        self.requests.append(
+            {"engines": engines, "languageTag": language_tag}
+        )
+        result = EngineResult("fake", "HELLO WORLD", 0.9, 0.9)
+        return result, [result], [], {"cacheHit": False}
+
+
 class FakeTranslator:
     def __init__(self):
         self.requests = []
@@ -84,6 +100,32 @@ def test_translate_selection_contract():
     assert payload["engineResults"][0]["engine"] == "fake"
     assert translator.requests == [
         {"text": "Hello world", "source": "en", "target": "pt-BR"}
+    ]
+
+
+def test_source_language_is_forwarded_to_windows_ocr():
+    ocr_service = LanguageAwareOcrService()
+    app = create_app(
+        BridgeConfig(),
+        ocr_service=ocr_service,
+        translator=ResultTranslator(),
+    )
+
+    response = app.test_client().post(
+        "/v1/translate-selection",
+        json={
+            "imageDataUrl": _png_data_url(),
+            "selection": {"x": 0, "y": 0, "width": 20, "height": 20},
+            "viewport": {"width": 20, "height": 20},
+            "source": "pt-BR",
+            "target": "en",
+            "engines": ["windowsocr"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert ocr_service.requests == [
+        {"engines": ["windowsocr"], "languageTag": "pt-BR"}
     ]
 
 

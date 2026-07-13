@@ -16,7 +16,7 @@ O G.R.C Translator foi criado principalmente para traduzir legendas de jogos. Vo
 
 - seleção de uma área automática;
 - tradução exibida por cima do jogo;
-- modo automático ou escolha entre Tesseract, PaddleOCR e EasyOCR;
+- modo automático ou escolha entre Windows OCR, Tesseract, PaddleOCR e EasyOCR;
 - atalho personalizado de teclado ou mouse;
 - cores, posição e transparência configuráveis;
 - suporte a mais de um monitor.
@@ -27,7 +27,8 @@ O G.R.C Translator foi criado principalmente para traduzir legendas de jogos. Vo
 - Python 3.10 ou mais recente;
 - Node.js LTS;
 - conexão com a internet;
-- Tesseract OCR, usado primeiro pelo modo automático.
+- Tesseract OCR, usado primeiro pelo modo automático;
+- pacote de idioma OCR do Windows para usar o mecanismo nativo opcional.
 
 ## Instalação
 
@@ -40,7 +41,7 @@ cd G-R-C-TRANSLATOR-
 
 python -m venv .\bridge\.venv
 .\bridge\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\bridge\.venv\Scripts\python.exe -m pip install -r .\bridge\requirements.txt -r .\bridge\requirements-tesseract.txt
+.\bridge\.venv\Scripts\python.exe -m pip install -r .\bridge\requirements.txt -r .\bridge\requirements-windowsocr.txt -r .\bridge\requirements-tesseract.txt
 winget install --id UB-Mannheim.TesseractOCR --exact
 
 cd .\electron_client

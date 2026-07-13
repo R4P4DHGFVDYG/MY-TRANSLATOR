@@ -21,6 +21,115 @@ def test_default_engine_uses_windows_tesseract():
     assert DEFAULT_ENGINES == ["tesseract"]
 
 
+def test_windows_ocr_engine_can_be_requested(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_max_variants=1))
+    monkeypatch.setattr(
+        service,
+        "_run_windowsocr",
+        lambda _image, _language=None: EngineResult(
+            "windowsocr", "HELLO WINDOWS", 0.0, 0.0
+        ),
+    )
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["windowsocr"],
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "HELLO WINDOWS"
+    assert [result.engine for result in results] == ["windowsocr:binary"]
+
+
+def test_windows_ocr_compares_binary_and_standard_without_fake_confidence(
+    monkeypatch,
+):
+    service = OcrService(BridgeConfig(ocr_max_variants=2))
+    seen_modes: list[str] = []
+
+    class FakeAdapter:
+        def recognize(self, image, language_tag=None):
+            seen_modes.append(image.mode)
+            assert language_tag == "pt-BR"
+            return "TEXTO"
+
+    monkeypatch.setattr(service, "_get_windowsocr_adapter", lambda: FakeAdapter())
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["windowsocr"],
+        language_tag="pt-BR",
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "TEXTO"
+    assert seen_modes == ["L", "RGB"]
+    assert [result.engine for result in results] == [
+        "windowsocr:binary",
+        "windowsocr:standard",
+    ]
+    assert all(result.raw_confidence == 0 for result in results)
+
+
+def test_windows_ocr_cache_is_scoped_by_source_language(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_max_variants=1))
+    languages: list[str | None] = []
+
+    def fake_windowsocr(_image, language_tag=None):
+        languages.append(language_tag)
+        return EngineResult("windowsocr", str(language_tag), 0.0, 0.0)
+
+    monkeypatch.setattr(service, "_run_windowsocr", fake_windowsocr)
+    image = Image.new("RGB", (120, 40), "white")
+
+    service.detect_text(image, ["windowsocr"], language_tag="en")
+    service.detect_text(image.copy(), ["windowsocr"], language_tag="pt-BR")
+
+    assert languages == ["en", "pt-BR"]
+
+
+def test_automatic_chain_continues_when_windows_ocr_is_unavailable(monkeypatch):
+    service = OcrService(
+        BridgeConfig(ocr_parallel_engines=False, ocr_max_variants=1)
+    )
+    paddle_calls = 0
+
+    monkeypatch.setattr(
+        service,
+        "_run_tesseract",
+        lambda _image: EngineResult("tesseract", "H3LL0", 0.4, 0.4),
+    )
+
+    def unavailable_windowsocr(_image, _language=None):
+        raise RuntimeError("Windows OCR support is not installed")
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "HELLO", 0.95, 0.95)
+
+    monkeypatch.setattr(service, "_run_windowsocr", unavailable_windowsocr)
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "windowsocr", "paddleocr"],
+        language_tag="en",
+    )
+
+    assert best is not None
+    assert best.text == "HELLO"
+    assert paddle_calls == 1
+    assert "windowsocr failed" in warnings[0]
+    assert [result.engine for result in results] == [
+        "tesseract:standard",
+        "windowsocr:binary",
+        "paddleocr:standard",
+    ]
+
+
 def test_paddleocr_engine_can_be_requested(monkeypatch):
     service = OcrService(BridgeConfig())
 

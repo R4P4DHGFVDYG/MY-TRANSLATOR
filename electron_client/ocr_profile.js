@@ -1,8 +1,8 @@
-const OCR_ENGINES = new Set(['auto', 'tesseract', 'paddleocr', 'easyocr']);
+const OCR_ENGINES = new Set(['auto', 'windowsocr', 'tesseract', 'paddleocr', 'easyocr']);
 
 function resolveOcrEngines(profile) {
     if (profile === 'auto') {
-        return ['tesseract', 'paddleocr'];
+        return ['tesseract', 'windowsocr', 'paddleocr'];
     }
     return OCR_ENGINES.has(profile) ? [profile] : ['tesseract'];
 }

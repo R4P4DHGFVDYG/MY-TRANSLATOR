@@ -19,10 +19,13 @@ from .image_utils import preprocess_variants_for_ocr
 from .models import EngineResult
 from .ranking import normalize_ocr_text, rank_ocr_results, text_quality_score
 from .text_region import isolate_text_region
+from .windows_ocr import WindowsOcrAdapter, windows_ocr_health
 
 
 DEFAULT_ENGINES = ["tesseract"]
-SUPPORTED_ENGINES = frozenset({"easyocr", "paddleocr", "tesseract"})
+SUPPORTED_ENGINES = frozenset(
+    {"windowsocr", "easyocr", "paddleocr", "tesseract"}
+)
 
 
 class OcrCapacityError(RuntimeError):
@@ -38,6 +41,7 @@ class OcrService:
         self.config = config
         self._easyocr_reader: Any | None = None
         self._paddleocr_reader: Any | None = None
+        self._windowsocr_adapter: WindowsOcrAdapter | None = None
         self._easyocr_lock = threading.Lock()
         self._paddleocr_lock = threading.Lock()
         self._request_slots = threading.BoundedSemaphore(
@@ -81,6 +85,7 @@ class OcrService:
             },
             "easyocr": self._easyocr_health(),
             "paddleocr": self._paddleocr_health(),
+            "windowsocr": self._windowsocr_health(),
             "tesseract": self._tesseract_health(),
         }
 
@@ -91,7 +96,9 @@ class OcrService:
         for engine in requested:
             normalized_engine = str(engine).strip().lower()
             try:
-                if normalized_engine == "easyocr":
+                if normalized_engine == "windowsocr":
+                    self._get_windowsocr_adapter().selected_language()
+                elif normalized_engine == "easyocr":
                     self._get_easyocr_reader()
                 elif normalized_engine == "paddleocr":
                     self._get_paddleocr_reader()
@@ -103,11 +110,16 @@ class OcrService:
         return warnings
 
     def detect_text(
-        self, image: Image.Image, engines: list[str] | None = None
+        self,
+        image: Image.Image,
+        engines: list[str] | None = None,
+        *,
+        language_tag: str | None = None,
     ) -> tuple[EngineResult | None, list[EngineResult], list[str]]:
         best, results, warnings, _metadata = self.detect_text_with_metadata(
             image,
             engines,
+            language_tag=language_tag,
         )
         return best, results, warnings
 
@@ -117,6 +129,7 @@ class OcrService:
         engines: list[str] | None = None,
         *,
         cancel_check: Callable[[], bool] | None = None,
+        language_tag: str | None = None,
     ) -> tuple[EngineResult | None, list[EngineResult], list[str], dict[str, bool]]:
         requested = engines if engines is not None else list(self.config.default_ocr_engines)
         results: list[EngineResult] = []
@@ -128,7 +141,12 @@ class OcrService:
             return None, results, warnings, {"cacheHit": False}
 
         _raise_if_cancelled(cancel_check)
-        cache_key = (tuple(normalized_engines), _image_fingerprint(image))
+        normalized_language = str(language_tag or "").strip().lower()
+        cache_key = (
+            tuple(normalized_engines),
+            normalized_language,
+            _image_fingerprint(image),
+        )
         cached = self._cache.get(cache_key)
         if _is_cached_detection(cached):
             best, cached_results, cached_warnings = _copy_detection(cached)
@@ -165,6 +183,7 @@ class OcrService:
                 parallel_results, parallel_warnings = self._detect_engines_parallel(
                     engine_tasks,
                     cancel_check,
+                    language_tag,
                 )
                 results.extend(parallel_results)
                 warnings.extend(parallel_warnings)
@@ -174,6 +193,7 @@ class OcrService:
                         normalized_engine,
                         engine_variants,
                         cancel_check,
+                        language_tag,
                     )
                     results.extend(engine_results)
                     warnings.extend(engine_warnings)
@@ -253,6 +273,7 @@ class OcrService:
         self,
         engine_tasks: list[tuple[str, list[tuple[str, Image.Image]]]],
         cancel_check: Callable[[], bool] | None = None,
+        language_tag: str | None = None,
     ) -> tuple[list[EngineResult], list[str]]:
         results: list[EngineResult] = []
         warnings: list[str] = []
@@ -264,6 +285,7 @@ class OcrService:
                     normalized_engine,
                     engine_variants,
                     cancel_check,
+                    language_tag,
                 ),
             )
             for normalized_engine, engine_variants in engine_tasks
@@ -289,6 +311,7 @@ class OcrService:
         normalized_engine: str,
         engine_variants: list[tuple[str, Image.Image]],
         cancel_check: Callable[[], bool] | None = None,
+        language_tag: str | None = None,
     ) -> tuple[list[EngineResult], list[str]]:
         results: list[EngineResult] = []
         warnings: list[str] = []
@@ -303,7 +326,11 @@ class OcrService:
             _raise_if_cancelled(cancel_check)
             attempted += 1
             try:
-                result = self._run_engine_with_timeout(normalized_engine, prepared)
+                result = self._run_engine_with_timeout(
+                    normalized_engine,
+                    prepared,
+                    language_tag,
+                )
             except TimeoutError:
                 message = (
                     f"{normalized_engine} timed out on {variant_name} after "
@@ -347,7 +374,11 @@ class OcrService:
                 raw_text=result.raw_text,
             )
             results.append(result)
-            if attempted >= minimum_attempts and self._is_reliable_result(result):
+            if (
+                normalized_engine != "windowsocr"
+                and attempted >= minimum_attempts
+                and self._is_reliable_result(result)
+            ):
                 if normalized_engine != "tesseract" or len(engine_variants) == 1:
                     break
                 texts = [
@@ -390,14 +421,17 @@ class OcrService:
         return len(texts) >= required and len(set(texts)) == 1
 
     def _run_engine_with_timeout(
-        self, normalized_engine: str, image: Image.Image
+        self,
+        normalized_engine: str,
+        image: Image.Image,
+        language_tag: str | None = None,
     ) -> EngineResult:
         timeout = self.config.ocr_engine_timeout_seconds
         if not self._acquire_engine_slot(timeout):
             raise OcrCapacityError("OCR engine capacity is busy")
         if timeout <= 0:
             try:
-                return self._run_engine(normalized_engine, image)
+                return self._run_engine(normalized_engine, image, language_tag)
             finally:
                 self._engine_slots.release()
 
@@ -406,6 +440,7 @@ class OcrService:
                 self._run_engine,
                 normalized_engine,
                 image,
+                language_tag,
             )
         except Exception:
             self._engine_slots.release()
@@ -422,12 +457,34 @@ class OcrService:
             return self._engine_slots.acquire(blocking=False)
         return self._engine_slots.acquire(timeout=timeout)
 
-    def _run_engine(self, normalized_engine: str, image: Image.Image) -> EngineResult:
+    def _run_engine(
+        self,
+        normalized_engine: str,
+        image: Image.Image,
+        language_tag: str | None = None,
+    ) -> EngineResult:
+        if normalized_engine == "windowsocr":
+            return self._run_windowsocr(image, language_tag)
         if normalized_engine == "easyocr":
             return self._run_easyocr(image)
         if normalized_engine == "paddleocr":
             return self._run_paddleocr(image)
         return self._run_tesseract(image)
+
+    def _run_windowsocr(
+        self,
+        image: Image.Image,
+        language_tag: str | None = None,
+    ) -> EngineResult:
+        text = self._get_windowsocr_adapter().recognize(image, language_tag)
+        return EngineResult("windowsocr", text, 0.0, 0.0)
+
+    def _get_windowsocr_adapter(self) -> WindowsOcrAdapter:
+        if self._windowsocr_adapter is None:
+            self._windowsocr_adapter = WindowsOcrAdapter(
+                self.config.windows_ocr_lang
+            )
+        return self._windowsocr_adapter
 
     def _run_easyocr(self, image: Image.Image) -> EngineResult:
         import numpy as np
@@ -667,6 +724,9 @@ class OcrService:
             "loaded": self._paddleocr_reader is not None,
         }
 
+    def _windowsocr_health(self) -> dict[str, Any]:
+        return windows_ocr_health(self.config.windows_ocr_lang)
+
     def _tesseract_health(self) -> dict[str, Any]:
         if importlib.util.find_spec("pytesseract") is None:
             return {"installed": False, "language": self.config.tesseract_lang}
@@ -722,6 +782,7 @@ def _is_engine_setup_failure(exc: Exception) -> bool:
         or "not in your path" in message
         or "package is not installed" in message
         or "no module named" in message
+        or "worker crashed" in message
     )
 
 

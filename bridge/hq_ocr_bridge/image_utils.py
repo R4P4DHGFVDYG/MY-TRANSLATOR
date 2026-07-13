@@ -115,6 +115,17 @@ def preprocess_variants_for_ocr(
     engine: str = "tesseract",
 ) -> list[tuple[str, Image.Image]]:
     normalized_engine = str(engine).strip().lower()
+    if normalized_engine == "windowsocr":
+        original = image if image.mode == "RGB" else image.convert("RGB")
+        gray = ImageOps.grayscale(image)
+        normalized = ImageOps.autocontrast(gray)
+        variants = [("binary", _binary_for_ocr(normalized))]
+        if max_variants == 1:
+            return variants
+
+        variants.append(("standard", original))
+        return variants
+
     if normalized_engine in {"easyocr", "paddleocr"}:
         original = image if image.mode == "RGB" else image.convert("RGB")
         variants = [("standard", original)]
