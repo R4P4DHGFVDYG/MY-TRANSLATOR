@@ -43,6 +43,22 @@ class LanguageAwareOcrService(FakeOcrService):
         return result, [result], [], {"cacheHit": False}
 
 
+class CacheBypassOcrService(LanguageAwareOcrService):
+    def detect_text_with_metadata(
+        self,
+        image,
+        engines,
+        *,
+        cancel_check,
+        language_tag,
+        preprocessing_profile="standard",
+        bypass_cache=False,
+    ):
+        self.requests.append({"bypassCache": bypass_cache})
+        result = EngineResult("fake", "HELLO WORLD", 0.9, 0.9)
+        return result, [result], [], {"cacheHit": False}
+
+
 class FakeTranslator:
     def __init__(self):
         self.requests = []
@@ -393,12 +409,58 @@ def test_older_desktop_request_is_discarded_before_image_decode():
         "/v1/translate-selection",
         json={"clientId": "desktop-test", "requestId": 1},
     )
+    duplicate = client.post(
+        "/v1/translate-selection",
+        json={"clientId": "desktop-test", "requestId": 2},
+    )
 
     assert current.status_code == 200
     assert current.get_json()["performance"]["requestId"] == 2
     assert stale.status_code == 409
     assert stale.get_json()["cancelled"] is True
+    assert duplicate.status_code == 409
+    assert duplicate.get_json()["cancelled"] is True
     assert ocr_service.requests == [{"engines": ["tesseract"]}]
+
+
+def test_request_id_must_fit_in_javascript_safe_integer_range():
+    app = create_app(
+        BridgeConfig(log_performance=False),
+        ocr_service=FakeOcrService(),
+        translator=FakeTranslator(),
+    )
+
+    response = app.test_client().post(
+        "/v1/translate-selection",
+        json={"clientId": "desktop-test", "requestId": 1 << 53},
+    )
+
+    assert response.status_code == 400
+    assert "safe integer" in response.get_json()["error"]
+
+
+def test_request_can_explicitly_bypass_the_ocr_cache():
+    ocr_service = CacheBypassOcrService()
+    app = create_app(
+        BridgeConfig(log_performance=False),
+        ocr_service=ocr_service,
+        translator=FakeTranslator(),
+    )
+    payload = {
+        "imageDataUrl": _png_data_url(),
+        "selection": {"x": 0, "y": 0, "width": 20, "height": 20},
+        "viewport": {"width": 20, "height": 20},
+        "bypassOcrCache": True,
+    }
+
+    response = app.test_client().post("/v1/translate-selection", json=payload)
+    payload["bypassOcrCache"] = "true"
+    invalid = app.test_client().post("/v1/translate-selection", json=payload)
+
+    assert response.status_code == 200
+    assert ocr_service.requests == [{"bypassCache": True}]
+    assert invalid.status_code == 400
+    assert "must be a boolean" in invalid.get_json()["error"]
 
 
 def test_ready_endpoint_is_ready_when_an_ocr_service_is_injected():

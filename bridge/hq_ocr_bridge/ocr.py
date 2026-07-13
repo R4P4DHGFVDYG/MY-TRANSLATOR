@@ -199,6 +199,7 @@ class OcrService:
         cancel_check: Callable[[], bool] | None = None,
         language_tag: str | None = None,
         preprocessing_profile: str = OCR_PREPROCESSING_STANDARD,
+        bypass_cache: bool = False,
     ) -> tuple[EngineResult | None, list[EngineResult], list[str], dict[str, bool]]:
         requested = engines if engines is not None else list(self.config.default_ocr_engines)
         results: list[EngineResult] = []
@@ -221,10 +222,11 @@ class OcrService:
             normalized_preprocessing,
             _image_fingerprint(image),
         )
-        cached = self._cache.get(cache_key)
-        if _is_cached_detection(cached):
-            best, cached_results, cached_warnings = _copy_detection(cached)
-            return best, cached_results, cached_warnings, {"cacheHit": True}
+        if not bypass_cache:
+            cached = self._cache.get(cache_key)
+            if _is_cached_detection(cached):
+                best, cached_results, cached_warnings = _copy_detection(cached)
+                return best, cached_results, cached_warnings, {"cacheHit": True}
 
         if not self._acquire_request_slot(cancel_check):
             raise OcrCapacityError("OCR service is busy; try again shortly")
@@ -232,10 +234,11 @@ class OcrService:
         try:
             # Another request may have populated the cache while this request was
             # waiting for the single inference slot.
-            cached = self._cache.get(cache_key)
-            if _is_cached_detection(cached):
-                best, cached_results, cached_warnings = _copy_detection(cached)
-                return best, cached_results, cached_warnings, {"cacheHit": True}
+            if not bypass_cache:
+                cached = self._cache.get(cache_key)
+                if _is_cached_detection(cached):
+                    best, cached_results, cached_warnings = _copy_detection(cached)
+                    return best, cached_results, cached_warnings, {"cacheHit": True}
 
             _raise_if_cancelled(cancel_check)
 
@@ -284,7 +287,8 @@ class OcrService:
                 language_tag=language_tag,
             )
             cached_detection = _copy_detection((best, results, warnings))
-            self._cache.set(cache_key, cached_detection)
+            if _is_cacheable_detection(best, results):
+                self._cache.set(cache_key, cached_detection)
             _raise_if_cancelled(cancel_check)
             return best, results, warnings, {"cacheHit": False}
         finally:
@@ -1044,6 +1048,15 @@ def _image_fingerprint(image: Image.Image) -> tuple[int, int, str, str]:
 
 def _is_cached_detection(value: object) -> bool:
     return isinstance(value, tuple) and len(value) == 3
+
+
+def _is_cacheable_detection(
+    best: EngineResult | None,
+    results: list[EngineResult],
+) -> bool:
+    if best is not None and bool(best.text.strip()):
+        return True
+    return bool(results) and all(result.warning is None for result in results)
 
 
 def _copy_detection(

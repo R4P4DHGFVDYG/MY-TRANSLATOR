@@ -1,4 +1,4 @@
 flask>=3.0,<4
 requests>=2.31,<3
-pillow>=10,<12
+pillow>=12.3,<13
 opencv-python-headless>=4.10,<5

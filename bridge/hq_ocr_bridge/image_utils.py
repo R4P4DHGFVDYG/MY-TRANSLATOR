@@ -13,10 +13,15 @@ DATA_URL_RE = re.compile(
     r"^data:image/(?P<mime>png|jpe?g|webp);base64,(?P<data>.+)$",
     re.IGNORECASE | re.DOTALL,
 )
+MAX_PREPROCESSED_PIXELS = 4_000_000
 
 
 class ImagePayloadTooLarge(ValueError):
     """Raised when an image payload exceeds a configured safety limit."""
+
+
+class ImageMediaTypeMismatch(ValueError):
+    """Raised when the data URL media type disagrees with decoded content."""
 
 
 def image_from_data_url(
@@ -33,6 +38,7 @@ def image_from_data_url(
         raise ValueError("imageDataUrl must be a base64 image data URL")
 
     encoded = match.group("data")
+    declared_format = _normalized_image_format(match.group("mime"))
     if max_image_bytes and len(encoded) > _max_base64_length(max_image_bytes):
         raise ImagePayloadTooLarge("imageDataUrl exceeds the allowed image size")
 
@@ -46,13 +52,18 @@ def image_from_data_url(
 
     try:
         with Image.open(BytesIO(raw)) as image:
+            actual_format = _normalized_image_format(image.format or "")
+            if actual_format != declared_format:
+                raise ImageMediaTypeMismatch(
+                    "imageDataUrl media type does not match the image content"
+                )
             if max_image_pixels and image.width * image.height > max_image_pixels:
                 raise ImagePayloadTooLarge(
                     "imageDataUrl exceeds the allowed pixel count"
                 )
             image.load()
             return image.convert("RGB")
-    except ImagePayloadTooLarge:
+    except (ImagePayloadTooLarge, ImageMediaTypeMismatch):
         raise
     except Exception as exc:
         raise ValueError("imageDataUrl contains an invalid image") from exc
@@ -72,13 +83,27 @@ def crop_visible_selection(
     width = _positive_float(selection, "width")
     height = _positive_float(selection, "height")
 
-    scale_x = image.width / viewport_width
-    scale_y = image.height / viewport_height
+    try:
+        scale_x = image.width / viewport_width
+        scale_y = image.height / viewport_height
+        scaled_coordinates = (
+            x * scale_x,
+            y * scale_y,
+            (x + width) * scale_x,
+            (y + height) * scale_y,
+        )
+    except OverflowError as exc:
+        raise ValueError("selection coordinates exceed the supported range") from exc
+    if not all(
+        math.isfinite(value)
+        for value in (scale_x, scale_y, *scaled_coordinates)
+    ):
+        raise ValueError("selection coordinates exceed the supported range")
 
-    left = _clamp(round(x * scale_x), 0, image.width)
-    top = _clamp(round(y * scale_y), 0, image.height)
-    right = _clamp(round((x + width) * scale_x), 0, image.width)
-    bottom = _clamp(round((y + height) * scale_y), 0, image.height)
+    left = _clamp(round(scaled_coordinates[0]), 0, image.width)
+    top = _clamp(round(scaled_coordinates[1]), 0, image.height)
+    right = _clamp(round(scaled_coordinates[2]), 0, image.width)
+    bottom = _clamp(round(scaled_coordinates[3]), 0, image.height)
 
     if right <= left or bottom <= top:
         raise ValueError("selection does not contain visible pixels")
@@ -200,6 +225,17 @@ def _limited_variants(
 def _upscale_for_ocr(image: Image.Image) -> Image.Image:
     if image.width < 900:
         scale = min(3, max(2, round(900 / max(image.width, 1))))
+        pixel_budget = max(
+            MAX_PREPROCESSED_PIXELS,
+            image.width * image.height,
+        )
+        while (
+            scale > 1
+            and image.width * image.height * scale * scale > pixel_budget
+        ):
+            scale -= 1
+        if scale <= 1:
+            return image
         resampling = getattr(Image, "Resampling", Image).LANCZOS
         image = image.resize(
             (image.width * scale, image.height * scale),
@@ -217,7 +253,10 @@ def _upscale_pixel_text(image: Image.Image) -> Image.Image:
     else:
         scale = 1
 
-    while scale > 1 and image.width * image.height * scale * scale > 4_000_000:
+    while (
+        scale > 1
+        and image.width * image.height * scale * scale > MAX_PREPROCESSED_PIXELS
+    ):
         scale -= 1
     if scale <= 1:
         return image
@@ -296,3 +335,8 @@ def _clamp(value: int, lower: int, upper: int) -> int:
 
 def _max_base64_length(max_bytes: int) -> int:
     return ((max_bytes + 2) // 3) * 4
+
+
+def _normalized_image_format(value: str) -> str:
+    normalized = value.strip().lower()
+    return "jpeg" if normalized in {"jpg", "jpeg"} else normalized

@@ -1015,6 +1015,54 @@ def test_ocr_cache_skips_unchanged_pixels(monkeypatch):
     assert second[0] is not first[0]
 
 
+def test_ocr_cache_can_be_bypassed_for_fresh_temporal_confirmation(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_max_variants=1))
+    calls = 0
+
+    def fake_paddleocr(image):
+        nonlocal calls
+        calls += 1
+        return EngineResult("paddleocr", "HELLO WORLD", 0.9, 0.9)
+
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+    image = Image.new("RGB", (120, 40), "white")
+
+    service.detect_text_with_metadata(image, ["paddleocr"])
+    cached = service.detect_text_with_metadata(image, ["paddleocr"])
+    fresh = service.detect_text_with_metadata(
+        image,
+        ["paddleocr"],
+        bypass_cache=True,
+    )
+
+    assert calls == 2
+    assert cached[3] == {"cacheHit": True}
+    assert fresh[3] == {"cacheHit": False}
+
+
+def test_ocr_cache_does_not_freeze_transient_engine_failures(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_max_variants=1))
+    calls = 0
+
+    def recovering_paddleocr(image):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary failure")
+        return EngineResult("paddleocr", "RECOVERED", 0.9, 0.9)
+
+    monkeypatch.setattr(service, "_run_paddleocr", recovering_paddleocr)
+    image = Image.new("RGB", (120, 40), "white")
+
+    failed = service.detect_text_with_metadata(image, ["paddleocr"])
+    recovered = service.detect_text_with_metadata(image, ["paddleocr"])
+
+    assert calls == 2
+    assert failed[0] is None
+    assert recovered[0].text == "RECOVERED"
+    assert recovered[3] == {"cacheHit": False}
+
+
 def test_ocr_cancellation_discards_work_before_another_variant(monkeypatch):
     service = OcrService(
         BridgeConfig(

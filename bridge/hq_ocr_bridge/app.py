@@ -28,6 +28,9 @@ from .ocr import (
 from .translation_text import prepare_text_for_translation
 
 
+MAX_SAFE_REQUEST_ID = (1 << 53) - 1
+
+
 def create_app(
     config: BridgeConfig | None = None,
     ocr_service: OcrService | None = None,
@@ -142,6 +145,7 @@ def create_app(
             preprocessing_profile = _requested_ocr_preprocessing_profile(payload)
             source = _language_code(payload.get("source") or "en")
             target = _language_code(payload.get("target") or "pt-BR")
+            bypass_ocr_cache = _boolean_field(payload, "bypassOcrCache", False)
         except ValueError as exc:
             return _error_response(str(exc), 400)
 
@@ -165,6 +169,7 @@ def create_app(
                 ticket,
                 source,
                 preprocessing_profile,
+                bypass_ocr_cache,
             )
         except OcrCancelledError:
             timings["ocrMs"] = _elapsed_ms(ocr_started_at)
@@ -200,6 +205,11 @@ def create_app(
         }
         if debug_capture:
             response_base["debugCapture"] = debug_capture.to_dict()
+
+        if not ticket.is_current():
+            return _superseded_response(
+                ticket, started_at, timings, bridge_config
+            )
 
         if best is None or not best.text:
             response_base["warnings"] = [*warnings, "No OCR text detected"]
@@ -316,12 +326,16 @@ class RequestTicket:
         registry: "LatestRequestRegistry | None",
         client_id: str | None,
         request_id: int | None,
+        accepted: bool = True,
     ) -> None:
         self._registry = registry
         self.client_id = client_id
         self.request_id = request_id
+        self._accepted = accepted
 
     def is_current(self) -> bool:
+        if not self._accepted:
+            return False
         if self._registry is None or self.client_id is None or self.request_id is None:
             return True
         return self._registry.is_current(self.client_id, self.request_id)
@@ -349,16 +363,19 @@ class LatestRequestRegistry:
             raise ValueError("clientId is too long")
         if isinstance(request_id, bool) or not isinstance(request_id, int) or request_id < 1:
             raise ValueError("requestId must be a positive integer")
+        if request_id > MAX_SAFE_REQUEST_ID:
+            raise ValueError("requestId exceeds the maximum safe integer")
 
         with self._lock:
             latest = self._latest.get(client_id)
-            if latest is None or request_id >= latest:
+            accepted = latest is None or request_id > latest
+            if accepted:
                 self._latest[client_id] = request_id
                 self._latest.move_to_end(client_id)
                 while len(self._latest) > self.capacity:
                     self._latest.popitem(last=False)
 
-        return RequestTicket(self, client_id, request_id)
+        return RequestTicket(self, client_id, request_id, accepted=accepted)
 
     def is_current(self, client_id: str, request_id: int) -> bool:
         with self._lock:
@@ -372,12 +389,15 @@ def _detect_text(
     ticket: RequestTicket,
     language_tag: str | None = None,
     preprocessing_profile: str = OCR_PREPROCESSING_STANDARD,
+    bypass_cache: bool = False,
 ) -> tuple[Any, list[Any], list[str], dict[str, bool]]:
     detect_with_metadata = getattr(ocr, "detect_text_with_metadata", None)
     if callable(detect_with_metadata):
         optional_kwargs: dict[str, Any] = {}
         if preprocessing_profile != OCR_PREPROCESSING_STANDARD:
             optional_kwargs["preprocessing_profile"] = preprocessing_profile
+        if bypass_cache:
+            optional_kwargs["bypass_cache"] = True
         return detect_with_metadata(
             crop,
             engines,
@@ -455,6 +475,17 @@ def _dict_field(payload: dict[str, Any], key: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{key} must be an object")
 
+    return value
+
+
+def _boolean_field(
+    payload: dict[str, Any], key: str, default: bool
+) -> bool:
+    if key not in payload:
+        return default
+    value = payload[key]
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean")
     return value
 
 

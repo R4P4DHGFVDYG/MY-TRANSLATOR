@@ -8,6 +8,7 @@ import pytest
 
 from hq_ocr_bridge.image_utils import (
     ImagePayloadTooLarge,
+    MAX_PREPROCESSED_PIXELS,
     crop_visible_selection,
     image_from_data_url,
     preprocess_variants_for_ocr,
@@ -58,6 +59,16 @@ def test_data_url_loader_accepts_png_data_url():
     assert decoded.size == (4, 3)
 
 
+def test_data_url_loader_rejects_content_that_does_not_match_media_type():
+    image = Image.new("RGB", (4, 3), "black")
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    data = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    with pytest.raises(ValueError, match="media type"):
+        image_from_data_url(f"data:image/jpeg;base64,{data}")
+
+
 def test_data_url_loader_enforces_encoded_bytes_and_pixel_limits():
     image = Image.new("RGB", (4, 3), "black")
     buffer = BytesIO()
@@ -86,6 +97,12 @@ def test_crop_rejects_non_finite_and_oversized_selections():
             {"x": 0, "y": 0, "width": 100, "height": 50},
             {"width": 100, "height": 50},
             max_crop_pixels=100,
+        )
+    with pytest.raises(ValueError, match="supported range"):
+        crop_visible_selection(
+            image,
+            {"x": 1e308, "y": 0, "width": 1e308, "height": 20},
+            {"width": 100, "height": 50},
         )
 
 
@@ -192,6 +209,14 @@ def test_pixel_looking_image_stays_on_standard_profile_without_override():
         engine="tesseract",
     )
     assert [name for name, _variant in variants] == ["standard", "binary"]
+
+
+def test_standard_preprocessing_does_not_amplify_extreme_images_unboundedly():
+    image = Image.new("L", (10, 100_000), 255)
+
+    prepared = preprocess_variants_for_ocr(image, max_variants=1)[0][1]
+
+    assert prepared.width * prepared.height <= MAX_PREPROCESSED_PIXELS
 
 
 def test_pixel_art_profile_forces_8_bit_variants():
