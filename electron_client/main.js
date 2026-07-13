@@ -75,6 +75,7 @@ let fixedCaptureTimer = null;
 let fixedCaptureGeneration = 0;
 let fixedCaptureRunning = false;
 let fixedCaptureLastError = '';
+let fixedCaptureBypassCache = false;
 let systemFontsCache = null;
 const resultCache = new Map();
 const fixedCaptureTracker = new FixedAreaChangeTracker();
@@ -211,6 +212,7 @@ function stopFixedCapture() {
     fixedCaptureTracker.reset();
     fixedCaptureCadence.reset();
     fixedCaptureLastError = '';
+    fixedCaptureBypassCache = false;
     if (hadFixedCapture) {
         cancelActiveTranslation();
         nextTranslationId += 1;
@@ -978,16 +980,30 @@ function startFixedCapture(selection, display) {
 }
 
 async function runFixedCapture(generation) {
-    if (generation !== fixedCaptureGeneration || !fixedCaptureRegion || fixedCaptureRunning) {
+    if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
+        return;
+    }
+    if (fixedCaptureRunning) {
+        scheduleFixedCapture(generation);
         return;
     }
 
     fixedCaptureRunning = true;
     const cycleStartedAt = performance.now();
-    let immediateRetry = false;
     const region = fixedCaptureRegion;
-    const display = screen.getAllDisplays().find(item => item.id === region.displayId)
-        || screen.getPrimaryDisplay();
+    const display = screen.getAllDisplays().find(item => item.id === region.displayId);
+    if (!display) {
+        const fallbackDisplay = screen.getPrimaryDisplay();
+        stopFixedCapture();
+        showToast(
+            'O monitor da área selecionada foi desconectado. Selecione a área novamente.',
+            fallbackDisplay.bounds.x,
+            fallbackDisplay.bounds.y,
+            settings,
+            fallbackDisplay
+        );
+        return;
+    }
     const anchorPoint = {
         x: display.bounds.x + region.selection.x,
         y: display.bounds.y + region.selection.y
@@ -1010,45 +1026,26 @@ async function runFixedCapture(generation) {
             logPerformance: false
         });
 
-        fixedCaptureLastError = '';
         console.info('[performance]', JSON.stringify({
             stage: 'fixed-capture-change',
             frameDifference: Number(fixedCaptureTracker.lastFrameDifference.toFixed(4)),
             captureIntervalMs: fixedCaptureCadence.currentInterval(),
             ...captured.performance
         }));
-        const translationId = ++nextTranslationId;
-        await translateSelection(captured, anchorPoint, display, translationId, {
-            showLoading: false,
-            handleErrors: false,
-            shouldDisplay: payload => {
-                if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
-                    return false;
-                }
-                const sourceText = payload.sourceText.trim();
-                if (!sourceText) {
-                    fixedCaptureTracker.updateText('');
-                    closeToastWindow();
-                    return false;
-                }
-                const decision = fixedCaptureTracker.evaluateText(
-                    sourceText,
-                    bestOcrScore(payload)
-                );
-                if (decision.retry) {
-                    fixedCaptureTracker.retryCurrentFrame();
-                    immediateRetry = true;
-                    console.info('[performance]', JSON.stringify({
-                        stage: 'ocr-temporal-confirmation',
-                        requestId: translationId
-                    }));
-                }
-                return decision.display;
-            }
-        });
+        const bypassCache = fixedCaptureBypassCache;
+        fixedCaptureBypassCache = false;
+        void processFixedTranslation(
+            captured,
+            anchorPoint,
+            display,
+            generation,
+            bypassCache
+        );
     } catch (error) {
         fixedCaptureCadence.noteError();
         if (generation === fixedCaptureGeneration && fixedCaptureRegion) {
+            fixedCaptureTracker.retryCurrentFrame();
+            fixedCaptureBypassCache = true;
             const message = errorMessageForTranslation(error, false);
             if (message !== fixedCaptureLastError) {
                 fixedCaptureLastError = message;
@@ -1060,8 +1057,91 @@ async function runFixedCapture(generation) {
         const cycleElapsedMs = performance.now() - cycleStartedAt;
         scheduleFixedCapture(
             generation,
-            fixedCaptureCadence.delayAfter(cycleElapsedMs, immediateRetry)
+            fixedCaptureCadence.delayAfter(cycleElapsedMs)
         );
+    }
+}
+
+async function processFixedTranslation(
+    captured,
+    anchorPoint,
+    display,
+    generation,
+    bypassCache
+) {
+    const translationId = ++nextTranslationId;
+    let immediateRetry = false;
+    try {
+        const payload = await translateSelection(
+            captured,
+            anchorPoint,
+            display,
+            translationId,
+            {
+                showLoading: false,
+                handleErrors: false,
+                skipClientCache: bypassCache,
+                bypassOcrCache: bypassCache,
+                cacheRejected: false,
+                shouldDisplay: result => {
+                    if (
+                        generation !== fixedCaptureGeneration
+                        || !fixedCaptureRegion
+                        || translationId !== nextTranslationId
+                    ) {
+                        return false;
+                    }
+                    const sourceText = result.sourceText.trim();
+                    if (!sourceText) {
+                        fixedCaptureTracker.updateText('');
+                        closeToastWindow();
+                        return false;
+                    }
+                    const decision = fixedCaptureTracker.evaluateText(
+                        sourceText,
+                        bestOcrScore(result)
+                    );
+                    if (decision.retry) {
+                        fixedCaptureTracker.retryCurrentFrame();
+                        fixedCaptureBypassCache = true;
+                        immediateRetry = true;
+                        console.info('[performance]', JSON.stringify({
+                            stage: 'ocr-temporal-confirmation',
+                            requestId: translationId
+                        }));
+                    }
+                    return decision.display;
+                }
+            }
+        );
+        if (
+            payload
+            && generation === fixedCaptureGeneration
+            && fixedCaptureRegion
+            && translationId === nextTranslationId
+        ) {
+            fixedCaptureLastError = '';
+            if (immediateRetry) {
+                scheduleFixedCapture(generation, 0);
+            }
+        }
+    } catch (error) {
+        if (
+            generation !== fixedCaptureGeneration
+            || !fixedCaptureRegion
+            || translationId !== nextTranslationId
+        ) {
+            return;
+        }
+        fixedCaptureCadence.noteError();
+        fixedCaptureTracker.retryCurrentFrame();
+        fixedCaptureBypassCache = true;
+        const message = errorMessageForTranslation(error, false);
+        if (message !== fixedCaptureLastError) {
+            fixedCaptureLastError = message;
+            showToast(message, anchorPoint.x, anchorPoint.y, settings, display);
+        }
+        scheduleFixedCapture(generation, FIXED_CAPTURE_ACTIVE_INTERVAL_MS);
     }
 }
 
@@ -1077,6 +1157,12 @@ function updateSettings(newSettings) {
     if (!isPlainObject(newSettings)) {
         return;
     }
+
+    const previousOcrContext = {
+        sourceLang: settings.sourceLang,
+        targetLang: settings.targetLang,
+        ocrEngine: settings.ocrEngine
+    };
 
     if (SOURCE_LANGUAGES.has(newSettings.sourceLang)) {
         settings.sourceLang = newSettings.sourceLang;
@@ -1126,6 +1212,22 @@ function updateSettings(newSettings) {
         pendingToastPayload = { ...pendingToastPayload, style: { ...settings } };
         if (toastReady) {
             sendToWindow(toastWindow, 'set-text', pendingToastPayload);
+        }
+    }
+
+    const ocrContextChanged = previousOcrContext.sourceLang !== settings.sourceLang
+        || previousOcrContext.targetLang !== settings.targetLang
+        || previousOcrContext.ocrEngine !== settings.ocrEngine;
+    if (ocrContextChanged) {
+        resultCache.clear();
+        cancelActiveTranslation();
+        nextTranslationId += 1;
+        fixedCaptureTracker.reset();
+        fixedCaptureCadence.reset();
+        fixedCaptureLastError = '';
+        fixedCaptureBypassCache = true;
+        if (fixedCaptureRegion && !fixedCaptureRunning) {
+            scheduleFixedCapture(fixedCaptureGeneration, 0);
         }
     }
 
@@ -1195,7 +1297,7 @@ async function readBridgeResponse(response) {
 }
 
 function errorMessageForTranslation(error, timedOut) {
-    if (timedOut) {
+    if (timedOut || (error && error.translationTimedOut === true)) {
         return 'A tradução demorou demais. Tente novamente.';
     }
     if (error instanceof Error && error.message) {
@@ -1278,7 +1380,9 @@ async function translateSelection(selection, anchorPoint, display, translationId
         ? options.shouldDisplay
         : () => true;
     const cacheKey = resultCacheKey(selection, requestSettings);
-    const cachedPayload = getCachedResult(cacheKey);
+    const cachedPayload = options.skipClientCache === true
+        ? null
+        : getCachedResult(cacheKey);
     if (cachedPayload) {
         if (shouldDisplay(cachedPayload)) {
             displayTranslationPayload(cachedPayload, anchorPoint, requestSettings, display);
@@ -1319,7 +1423,8 @@ async function translateSelection(selection, anchorPoint, display, translationId
                 engines: resolveOcrEngines(requestSettings.ocrEngine),
                 ocrPreprocessing: resolveOcrPreprocessing(requestSettings.ocrEngine),
                 clientId: CLIENT_ID,
-                requestId: translationId
+                requestId: translationId,
+                bypassOcrCache: options.bypassOcrCache === true
             })
         });
         const payload = await readBridgeResponse(response);
@@ -1327,8 +1432,11 @@ async function translateSelection(selection, anchorPoint, display, translationId
             return;
         }
 
-        cacheResult(cacheKey, payload);
-        if (shouldDisplay(payload)) {
+        const displayPayload = shouldDisplay(payload);
+        if (displayPayload || options.cacheRejected !== false) {
+            cacheResult(cacheKey, payload);
+        }
+        if (displayPayload) {
             displayTranslationPayload(payload, anchorPoint, requestSettings, display);
         }
         console.info('[performance]', JSON.stringify({
@@ -1344,6 +1452,9 @@ async function translateSelection(selection, anchorPoint, display, translationId
             return;
         }
 
+        if (timedOut && error && typeof error === 'object') {
+            error.translationTimedOut = true;
+        }
         if (options.handleErrors === false) {
             throw error;
         }
