@@ -11,6 +11,7 @@ from hq_ocr_bridge.windows_ocr import (
     WindowsOcrAdapter,
     _limit_image_size,
     _ordered_result_text,
+    _warm_up_worker,
     _worker_engine_for,
 )
 
@@ -90,6 +91,27 @@ def test_windows_ocr_native_crash_resets_worker_without_killing_bridge():
 
     assert adapter._executor is None
     assert shutdown_calls == [(False, True)]
+
+
+def test_windows_ocr_warmup_starts_worker_and_resolves_language():
+    submitted: list[tuple[object, str]] = []
+
+    class WarmupFuture:
+        @staticmethod
+        def result():
+            return "en-US"
+
+    class WarmupExecutor:
+        @staticmethod
+        def submit(function, language_tag):
+            submitted.append((function, language_tag))
+            return WarmupFuture()
+
+    adapter = WindowsOcrAdapter("en-US")
+    adapter._executor = WarmupExecutor()
+
+    assert adapter.warm_up() == "en-US"
+    assert submitted == [(_warm_up_worker, "en-US")]
 
 
 def test_windows_ocr_limits_images_to_native_maximum_dimension():

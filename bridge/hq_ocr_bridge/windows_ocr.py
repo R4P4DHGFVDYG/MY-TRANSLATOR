@@ -43,6 +43,20 @@ class WindowsOcrAdapter:
         requested = str(language_tag or self.language_tag).strip() or self.language_tag
         return _resolve_language_tag(requested)
 
+    def warm_up(self, language_tag: str | None = None) -> str:
+        requested = (
+            str(language_tag or self.language_tag).strip() or self.language_tag
+        )
+        with self._lock:
+            executor = self._get_executor()
+            try:
+                return executor.submit(_warm_up_worker, requested).result()
+            except BrokenProcessPool as exc:
+                self._reset_executor()
+                raise RuntimeError(
+                    "Windows OCR worker crashed during warmup; the Bridge stayed online"
+                ) from exc
+
     def close(self) -> None:
         with self._lock:
             self._reset_executor()
@@ -71,6 +85,11 @@ def _encode_image(image: Image.Image) -> bytes:
 def _recognize_in_worker(encoded: bytes, language_tag: str) -> str:
     engine, _selected = _worker_engine_for(language_tag)
     return asyncio.run(_recognize_with_engine(engine, encoded))
+
+
+def _warm_up_worker(language_tag: str) -> str:
+    _engine, selected = _worker_engine_for(language_tag)
+    return selected
 
 
 def _worker_engine_for(language_tag: str) -> tuple[Any, str]:

@@ -277,7 +277,7 @@ def _start_ocr_warmup(
     def run_warmup() -> None:
         started_at = perf_counter()
         try:
-            warnings = ocr.warm_up(list(config.default_ocr_engines))
+            warnings = ocr.warm_up(list(config.ocr_warmup_engines))
             collected_warnings.extend(warnings)
             for warning in warnings:
                 print(f"OCR warmup: {warning}", flush=True)
@@ -289,6 +289,7 @@ def _start_ocr_warmup(
                     + json.dumps(
                         {
                             "stage": "ocrWarmup",
+                            "engines": list(config.ocr_warmup_engines),
                             "totalMs": round(_elapsed_ms(started_at), 2),
                             "warnings": len(collected_warnings),
                         },

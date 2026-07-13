@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from dataclasses import replace
 import hashlib
 import importlib.util
@@ -51,6 +51,9 @@ class OcrService:
         self._windowsocr_adapter: WindowsOcrAdapter | None = None
         self._easyocr_lock = threading.Lock()
         self._paddleocr_lock = threading.Lock()
+        self._windowsocr_lock = threading.Lock()
+        self._warmup_timings_lock = threading.Lock()
+        self._warmup_timings: dict[str, float] = {}
         self._request_slots = threading.BoundedSemaphore(
             config.ocr_max_concurrent_requests
         )
@@ -71,6 +74,8 @@ class OcrService:
         )
 
     def health_checks(self) -> dict[str, Any]:
+        with self._warmup_timings_lock:
+            warmup_timings = dict(self._warmup_timings)
         return {
             "settings": {
                 "defaultEngines": list(self.config.default_ocr_engines),
@@ -88,6 +93,8 @@ class OcrService:
                 "cacheCapacity": self.config.ocr_cache_capacity,
                 "cacheTtlSeconds": self.config.ocr_cache_ttl_seconds,
                 "warmupOnStart": self.config.ocr_warmup_on_start,
+                "warmupEngines": list(self.config.ocr_warmup_engines),
+                "lastWarmupMs": warmup_timings,
                 "allowedEngines": list(self.config.allowed_ocr_engines),
             },
             "easyocr": self._easyocr_health(),
@@ -97,24 +104,67 @@ class OcrService:
         }
 
     def warm_up(self, engines: list[str] | tuple[str, ...] | None = None) -> list[str]:
-        warnings: list[str] = []
-        requested = engines or self.config.default_ocr_engines
+        requested = engines or self.config.ocr_warmup_engines
+        normalized_engines = list(
+            dict.fromkeys(
+                str(engine).strip().lower()
+                for engine in requested
+                if str(engine).strip()
+            )
+        )
+        failures: dict[str, str] = {}
+        supported_engines = [
+            engine for engine in normalized_engines if engine in SUPPORTED_ENGINES
+        ]
+        for engine in normalized_engines:
+            if engine not in SUPPORTED_ENGINES:
+                failures[engine] = "unsupported OCR engine"
 
-        for engine in requested:
-            normalized_engine = str(engine).strip().lower()
-            try:
-                if normalized_engine == "windowsocr":
-                    self._get_windowsocr_adapter().selected_language()
-                elif normalized_engine == "easyocr":
-                    self._get_easyocr_reader()
-                elif normalized_engine == "paddleocr":
-                    self._get_paddleocr_reader()
-                elif normalized_engine == "tesseract":
-                    self._ensure_tesseract_available()
-            except Exception as exc:
-                warnings.append(f"{normalized_engine} warmup failed: {exc}")
+        if supported_engines:
+            worker_count = min(
+                len(supported_engines),
+                self.config.ocr_max_parallel_engines,
+            )
+            with ThreadPoolExecutor(
+                max_workers=worker_count,
+                thread_name_prefix="ocr-warmup-engine",
+            ) as executor:
+                futures = {
+                    executor.submit(self._warm_up_engine_with_timing, engine): engine
+                    for engine in supported_engines
+                }
+                for future in as_completed(futures):
+                    engine = futures[future]
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        failures[engine] = str(exc)
 
-        return warnings
+        return [
+            f"{engine} warmup failed: {failures[engine]}"
+            for engine in normalized_engines
+            if engine in failures
+        ]
+
+    def _warm_up_engine_with_timing(self, engine: str) -> None:
+        started_at = time.perf_counter()
+        try:
+            self._warm_up_engine(engine)
+        finally:
+            elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            with self._warmup_timings_lock:
+                self._warmup_timings[engine] = elapsed_ms
+
+    def _warm_up_engine(self, engine: str) -> None:
+        if engine == "windowsocr":
+            self._get_windowsocr_adapter().warm_up()
+        elif engine == "easyocr":
+            self._get_easyocr_reader()
+        elif engine == "paddleocr":
+            self._get_paddleocr_reader()
+        elif engine == "tesseract":
+            self._ensure_tesseract_available()
+            self._run_tesseract_psm(Image.new("L", (96, 32), 255), 7)
 
     def detect_text(
         self,
@@ -592,9 +642,11 @@ class OcrService:
 
     def _get_windowsocr_adapter(self) -> WindowsOcrAdapter:
         if self._windowsocr_adapter is None:
-            self._windowsocr_adapter = WindowsOcrAdapter(
-                self.config.windows_ocr_lang
-            )
+            with self._windowsocr_lock:
+                if self._windowsocr_adapter is None:
+                    self._windowsocr_adapter = WindowsOcrAdapter(
+                        self.config.windows_ocr_lang
+                    )
         return self._windowsocr_adapter
 
     def _run_easyocr(self, image: Image.Image) -> EngineResult:

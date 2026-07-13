@@ -100,6 +100,11 @@ class BridgeConfig:
     ocr_cache_capacity: int = 128
     ocr_cache_ttl_seconds: float = 600.0
     ocr_warmup_on_start: bool = True
+    ocr_warmup_engines: tuple[str, ...] = (
+        "tesseract",
+        "windowsocr",
+        "paddleocr",
+    )
     easyocr_lang: str = "en"
     easyocr_model_dir: str | None = None
     allow_easyocr_download: bool = False
@@ -148,6 +153,22 @@ class BridgeConfig:
             raise ValueError(
                 "default_ocr_engines must be included in allowed_ocr_engines"
             )
+
+        configured_warmup_engines = _unique_lower(self.ocr_warmup_engines)
+        unknown_warmup_engines = set(configured_warmup_engines) - {
+            "windowsocr",
+            "easyocr",
+            "paddleocr",
+            "tesseract",
+        }
+        if unknown_warmup_engines:
+            raise ValueError(
+                "ocr_warmup_engines contains unsupported engines: "
+                + ", ".join(sorted(unknown_warmup_engines))
+            )
+        warmup_engines = tuple(
+            engine for engine in configured_warmup_engines if engine in allowed_engines
+        ) or default_engines
 
         if not self.paddleocr_lang.strip():
             raise ValueError("paddleocr_lang must not be empty")
@@ -210,6 +231,7 @@ class BridgeConfig:
 
         object.__setattr__(self, "allowed_ocr_engines", allowed_engines)
         object.__setattr__(self, "default_ocr_engines", default_engines)
+        object.__setattr__(self, "ocr_warmup_engines", warmup_engines)
         object.__setattr__(self, "paddleocr_detection_model", detection_model)
         object.__setattr__(self, "paddleocr_recognition_model", recognition_model)
         object.__setattr__(self, "cors_allowed_origins", origins)
@@ -290,6 +312,9 @@ class BridgeConfig:
             ),
             ocr_warmup_on_start=_bool_from_env(
                 "HQ_OCR_WARMUP_ON_START", cls.ocr_warmup_on_start
+            ),
+            ocr_warmup_engines=_csv_from_env(
+                "HQ_OCR_WARMUP_ENGINES", cls.ocr_warmup_engines
             ),
             easyocr_lang=os.getenv("HQ_OCR_EASYOCR_LANG", cls.easyocr_lang),
             easyocr_model_dir=os.getenv("HQ_OCR_EASYOCR_MODEL_DIR") or None,

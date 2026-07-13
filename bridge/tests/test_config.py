@@ -15,6 +15,9 @@ def test_performance_env_vars_are_loaded(monkeypatch):
     monkeypatch.setenv("HQ_OCR_ACCEPT_SCORE", "0.75")
     monkeypatch.setenv("HQ_OCR_ACCEPT_CONFIDENCE", "0.7")
     monkeypatch.setenv("HQ_OCR_WARMUP_ON_START", "yes")
+    monkeypatch.setenv(
+        "HQ_OCR_WARMUP_ENGINES", "windowsocr,tesseract,paddleocr"
+    )
     monkeypatch.setenv("HQ_OCR_EASYOCR_GPU", "on")
     monkeypatch.setenv("HQ_OCR_WINDOWS_LANG", "pt-BR")
 
@@ -29,6 +32,11 @@ def test_performance_env_vars_are_loaded(monkeypatch):
     assert config.ocr_accept_score == 0.75
     assert config.ocr_accept_confidence == 0.7
     assert config.ocr_warmup_on_start is True
+    assert config.ocr_warmup_engines == (
+        "windowsocr",
+        "tesseract",
+        "paddleocr",
+    )
     assert config.paddleocr_max_pixels == 1_500_000
     assert config.easyocr_gpu is True
     assert config.windows_ocr_lang == "pt-BR"
@@ -62,6 +70,11 @@ def test_config_exposes_safety_limits_and_tesseract_default(
     assert config.ocr_accept_score == 0.8
     assert config.ocr_accept_confidence == 0.78
     assert config.ocr_warmup_on_start is True
+    assert config.ocr_warmup_engines == (
+        "tesseract",
+        "windowsocr",
+        "paddleocr",
+    )
 
 
 def test_config_requires_both_named_paddle_models_and_explicit_cors_origins():
@@ -80,6 +93,17 @@ def test_config_requires_both_named_paddle_models_and_explicit_cors_origins():
         BridgeConfig(ocr_accept_confidence=-0.1)
     with pytest.raises(ValueError, match="windows_ocr_lang"):
         BridgeConfig(windows_ocr_lang=" ")
+    with pytest.raises(ValueError, match="ocr_warmup_engines"):
+        BridgeConfig(ocr_warmup_engines=("imaginary",))
+
+
+def test_warmup_engines_are_limited_to_allowed_engines():
+    config = BridgeConfig(
+        allowed_ocr_engines=("tesseract", "paddleocr"),
+        ocr_warmup_engines=("windowsocr", "tesseract", "paddleocr"),
+    )
+
+    assert config.ocr_warmup_engines == ("tesseract", "paddleocr")
 
 
 def test_config_reserves_request_space_for_base64_and_json_envelope():
