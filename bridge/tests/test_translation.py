@@ -148,6 +148,22 @@ def test_deepl_maps_chinese_source_and_target_variants(monkeypatch):
     assert client.translate("简体中文", "zh-CN", "zh-TW") == "繁體中文"
 
 
+def test_deepl_maps_generic_english_target_to_supported_variant(monkeypatch):
+    def fake_post(url, data=None, json=None, headers=None, timeout=None):
+        assert data["target_lang"] == "EN-US"
+        return FakeResponse({"translations": [{"text": "Hello"}]})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = LibreTranslateClient(
+        BridgeConfig(
+            translation_providers=("deepl",),
+            deepl_auth_key="test-key",
+        )
+    )
+
+    assert client.translate("Ola", "pt-BR", "en") == "Hello"
+
+
 def test_libretranslate_uses_base_codes_for_regional_languages(monkeypatch):
     def fake_post(url, data=None, json=None, headers=None, timeout=None):
         assert json["source"] == "pt"
@@ -215,3 +231,24 @@ def test_malformed_provider_response_falls_back_to_next_provider(monkeypatch):
     assert result.text == "OLA MUNDO"
     assert result.provider == "google"
     assert result.warnings == ("deepl: DeepL returned an invalid response",)
+
+
+def test_empty_provider_response_is_rejected_and_not_cached(monkeypatch):
+    calls = 0
+
+    def fake_post(url, data=None, json=None, headers=None, timeout=None):
+        nonlocal calls
+        calls += 1
+        return FakeResponse({"translatedText": "   "})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = LibreTranslateClient(
+        BridgeConfig(translation_providers=("libretranslate",))
+    )
+
+    with pytest.raises(RuntimeError, match="did not include translatedText"):
+        client.translate("HELLO", "en", "pt-BR")
+    with pytest.raises(RuntimeError, match="did not include translatedText"):
+        client.translate("HELLO", "en", "pt-BR")
+
+    assert calls == 2

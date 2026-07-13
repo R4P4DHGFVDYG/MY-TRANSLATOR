@@ -757,7 +757,8 @@ class OcrService:
             with self._windowsocr_lock:
                 if self._windowsocr_adapter is None:
                     self._windowsocr_adapter = WindowsOcrAdapter(
-                        self.config.windows_ocr_lang
+                        self.config.windows_ocr_lang,
+                        self.config.ocr_engine_timeout_seconds,
                     )
         return self._windowsocr_adapter
 
@@ -1390,6 +1391,7 @@ def _filtered_tesseract_words(data: dict[str, Any]) -> list[tuple[str, float]]:
     for line_entries in lines.values():
         reliable = [entry for entry in line_entries if entry["confidence"] >= 50]
         if not reliable:
+            filtered.extend(line_entries)
             continue
         first_reliable_left = min(entry["left"] for entry in reliable)
         for entry in line_entries:

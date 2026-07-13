@@ -66,6 +66,7 @@ def test_config_exposes_safety_limits_and_tesseract_default(
         "tesseract",
     )
     assert config.windows_ocr_lang == "en-US"
+    assert config.ocr_engine_timeout_seconds == 8.0
     assert config.ocr_max_variants == 2
     assert config.ocr_accept_score == 0.8
     assert config.ocr_accept_confidence == 0.78

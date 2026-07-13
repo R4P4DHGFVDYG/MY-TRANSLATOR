@@ -88,7 +88,7 @@ class BridgeConfig:
     )
     max_ocr_engines: int = 3
     force_ocr_engines: bool = False
-    ocr_engine_timeout_seconds: float = 0.0
+    ocr_engine_timeout_seconds: float = 8.0
     ocr_parallel_engines: bool = False
     ocr_max_parallel_engines: int = 3
     ocr_max_concurrent_requests: int = 1

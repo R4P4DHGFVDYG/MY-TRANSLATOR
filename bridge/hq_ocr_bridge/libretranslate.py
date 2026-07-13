@@ -129,6 +129,10 @@ class LibreTranslateClient:
                 errors.append(f"{provider}: {exc}")
                 continue
 
+            if not isinstance(translated, str) or not translated.strip():
+                errors.append(f"{provider}: provider returned empty text")
+                continue
+
             return TranslationResult(
                 text=translated,
                 provider=provider,
@@ -219,7 +223,7 @@ class LibreTranslateClient:
         if not isinstance(first_translation, dict):
             raise RuntimeError("DeepL response did not include a translation object")
         translated = first_translation.get("text")
-        if not isinstance(translated, str):
+        if not isinstance(translated, str) or not translated.strip():
             raise RuntimeError("DeepL response did not include text")
         return translated
 
@@ -245,7 +249,7 @@ class LibreTranslateClient:
         if not isinstance(payload, dict):
             raise RuntimeError("LibreTranslate returned an invalid response")
         translated = payload.get("translatedText")
-        if not isinstance(translated, str):
+        if not isinstance(translated, str) or not translated.strip():
             raise RuntimeError("LibreTranslate response did not include translatedText")
 
         return translated
@@ -296,6 +300,8 @@ def _deepl_source_lang(value: str) -> str:
 
 def _deepl_target_lang(value: str) -> str:
     normalized = value.strip().upper().replace("_", "-")
+    if normalized == "EN":
+        return "EN-US"
     if normalized == "PT":
         return "PT-BR"
     if normalized == "ZH-CN":

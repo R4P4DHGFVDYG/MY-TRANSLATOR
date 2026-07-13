@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, TimeoutError
 from concurrent.futures.process import BrokenProcessPool
 from io import BytesIO
 import math
@@ -17,8 +17,9 @@ _WORKER_ENGINES: dict[str, tuple[Any, str]] = {}
 
 
 class WindowsOcrAdapter:
-    def __init__(self, language_tag: str) -> None:
+    def __init__(self, language_tag: str, timeout_seconds: float = 0.0) -> None:
         self.language_tag = language_tag
+        self.timeout_seconds = max(0.0, float(timeout_seconds))
         self._lock = threading.Lock()
         self._executor: ProcessPoolExecutor | None = None
 
@@ -28,11 +29,12 @@ class WindowsOcrAdapter:
         with self._lock:
             executor = self._get_executor()
             try:
-                return executor.submit(
+                future = executor.submit(
                     _recognize_in_worker,
                     encoded,
                     requested,
-                ).result()
+                )
+                return self._future_result(future, "recognition")
             except BrokenProcessPool as exc:
                 self._reset_executor()
                 raise RuntimeError(
@@ -50,7 +52,8 @@ class WindowsOcrAdapter:
         with self._lock:
             executor = self._get_executor()
             try:
-                return executor.submit(_warm_up_worker, requested).result()
+                future = executor.submit(_warm_up_worker, requested)
+                return self._future_result(future, "warmup")
             except BrokenProcessPool as exc:
                 self._reset_executor()
                 raise RuntimeError(
@@ -68,6 +71,19 @@ class WindowsOcrAdapter:
                 mp_context=multiprocessing.get_context("spawn"),
             )
         return self._executor
+
+    def _future_result(self, future: Any, operation: str) -> str:
+        try:
+            if self.timeout_seconds > 0:
+                return future.result(timeout=self.timeout_seconds)
+            return future.result()
+        except TimeoutError as exc:
+            future.cancel()
+            self._reset_executor()
+            raise TimeoutError(
+                f"Windows OCR {operation} timed out after "
+                f"{self.timeout_seconds:g}s"
+            ) from exc
 
     def _reset_executor(self) -> None:
         executor = self._executor
@@ -318,6 +334,7 @@ def _select_available_language_tag(
         )
         if scripted is not None:
             return scripted
+        return None
 
     return next(
         (

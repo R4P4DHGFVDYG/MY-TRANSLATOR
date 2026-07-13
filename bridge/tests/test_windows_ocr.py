@@ -94,6 +94,45 @@ def test_windows_ocr_native_crash_resets_worker_without_killing_bridge():
     assert shutdown_calls == [(False, True)]
 
 
+def test_windows_ocr_timeout_recycles_the_worker():
+    shutdown_calls: list[tuple[bool, bool]] = []
+
+    class TimedOutFuture:
+        cancelled = False
+
+        def result(self, *, timeout):
+            assert timeout == 0.01
+            raise TimeoutError("worker stuck")
+
+        def cancel(self):
+            self.cancelled = True
+
+    future = TimedOutFuture()
+
+    class TimedOutExecutor:
+        @staticmethod
+        def submit(*_args, **_kwargs):
+            return future
+
+        @staticmethod
+        def shutdown(*, wait, cancel_futures):
+            shutdown_calls.append((wait, cancel_futures))
+
+    adapter = WindowsOcrAdapter("en-US", timeout_seconds=0.01)
+    adapter._executor = TimedOutExecutor()
+
+    try:
+        adapter.recognize(Image.new("RGB", (120, 40), "white"))
+    except TimeoutError as exc:
+        assert "timed out" in str(exc)
+    else:
+        raise AssertionError("stuck Windows OCR worker should time out")
+
+    assert future.cancelled is True
+    assert adapter._executor is None
+    assert shutdown_calls == [(False, True)]
+
+
 def test_windows_ocr_warmup_starts_worker_and_resolves_language():
     submitted: list[tuple[object, str]] = []
 
@@ -132,6 +171,7 @@ def test_windows_ocr_selects_the_requested_chinese_script():
 
     assert _select_available_language_tag("zh-CN", available) == "zh-Hans-CN"
     assert _select_available_language_tag("zh-TW", available) == "zh-Hant-TW"
+    assert _select_available_language_tag("zh-CN", ["zh-Hant-TW"]) is None
 
 
 def test_windows_ocr_language_selection_keeps_exact_and_base_fallbacks():

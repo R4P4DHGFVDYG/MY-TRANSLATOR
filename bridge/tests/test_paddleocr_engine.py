@@ -560,6 +560,25 @@ def test_tesseract_filters_large_portrait_artifacts_and_detached_noise():
     ]
 
 
+def test_tesseract_preserves_a_complete_low_confidence_line():
+    data = {
+        "text": ["faint", "line"],
+        "conf": [49, 48],
+        "left": [10, 80],
+        "width": [55, 45],
+        "height": [24, 24],
+        "block_num": [1, 1],
+        "par_num": [1, 1],
+        "line_num": [1, 1],
+        "word_num": [1, 2],
+    }
+
+    assert _filtered_tesseract_words(data) == [
+        ("faint", 49.0),
+        ("line", 48.0),
+    ]
+
+
 def test_ocr_max_variants_limits_easyocr_work(monkeypatch):
     service = OcrService(
         BridgeConfig(
