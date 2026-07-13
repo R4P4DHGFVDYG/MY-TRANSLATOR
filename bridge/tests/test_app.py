@@ -33,10 +33,12 @@ class LanguageAwareOcrService(FakeOcrService):
         *,
         cancel_check,
         language_tag,
+        preprocessing_profile="auto",
     ):
-        self.requests.append(
-            {"engines": engines, "languageTag": language_tag}
-        )
+        request = {"engines": engines, "languageTag": language_tag}
+        if preprocessing_profile != "auto":
+            request["preprocessingProfile"] = preprocessing_profile
+        self.requests.append(request)
         result = EngineResult("fake", "HELLO WORLD", 0.9, 0.9)
         return result, [result], [], {"cacheHit": False}
 
@@ -127,6 +129,60 @@ def test_source_language_is_forwarded_to_windows_ocr():
     assert ocr_service.requests == [
         {"engines": ["windowsocr"], "languageTag": "pt-BR"}
     ]
+
+
+def test_pixel_art_preprocessing_profile_reaches_ocr_service():
+    ocr_service = LanguageAwareOcrService()
+    app = create_app(
+        BridgeConfig(),
+        ocr_service=ocr_service,
+        translator=ResultTranslator(),
+    )
+
+    response = app.test_client().post(
+        "/v1/translate-selection",
+        json={
+            "imageDataUrl": _png_data_url(),
+            "selection": {"x": 0, "y": 0, "width": 20, "height": 20},
+            "viewport": {"width": 20, "height": 20},
+            "source": "en",
+            "target": "pt-BR",
+            "engines": ["tesseract", "windowsocr", "paddleocr"],
+            "ocrPreprocessing": "pixel-art",
+        },
+    )
+
+    assert response.status_code == 200
+    assert ocr_service.requests == [
+        {
+            "engines": ["tesseract", "windowsocr", "paddleocr"],
+            "languageTag": "en",
+            "preprocessingProfile": "pixel-art",
+        }
+    ]
+
+
+def test_invalid_ocr_preprocessing_profile_is_rejected():
+    ocr_service = LanguageAwareOcrService()
+    app = create_app(
+        BridgeConfig(),
+        ocr_service=ocr_service,
+        translator=ResultTranslator(),
+    )
+
+    response = app.test_client().post(
+        "/v1/translate-selection",
+        json={
+            "imageDataUrl": _png_data_url(),
+            "selection": {"x": 0, "y": 0, "width": 20, "height": 20},
+            "viewport": {"width": 20, "height": 20},
+            "ocrPreprocessing": "unknown",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "unsupported OCR preprocessing profile" in response.get_json()["error"]
+    assert ocr_service.requests == []
 
 
 def test_translation_result_metadata_is_scoped_to_the_response():

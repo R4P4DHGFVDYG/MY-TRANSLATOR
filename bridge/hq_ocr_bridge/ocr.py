@@ -31,6 +31,11 @@ from .windows_ocr import WindowsOcrAdapter, windows_ocr_health
 DEFAULT_ENGINES = ["tesseract"]
 AUTOMATIC_PROFILE_ENGINES = ("tesseract", "windowsocr", "paddleocr")
 AUTOMATIC_FAST_ENGINES = ("tesseract", "windowsocr")
+OCR_PREPROCESSING_AUTO = "auto"
+OCR_PREPROCESSING_PIXEL_ART = "pixel-art"
+SUPPORTED_OCR_PREPROCESSING_PROFILES = frozenset(
+    {OCR_PREPROCESSING_AUTO, OCR_PREPROCESSING_PIXEL_ART}
+)
 AUTOMATIC_NEAR_CONSENSUS_MIN_LENGTH = 20
 AUTOMATIC_NEAR_CONSENSUS_SIMILARITY = 0.96
 AUTOMATIC_NEAR_CONSENSUS_WINDOWS_SCORE = 0.60
@@ -176,11 +181,13 @@ class OcrService:
         engines: list[str] | None = None,
         *,
         language_tag: str | None = None,
+        preprocessing_profile: str = OCR_PREPROCESSING_AUTO,
     ) -> tuple[EngineResult | None, list[EngineResult], list[str]]:
         best, results, warnings, _metadata = self.detect_text_with_metadata(
             image,
             engines,
             language_tag=language_tag,
+            preprocessing_profile=preprocessing_profile,
         )
         return best, results, warnings
 
@@ -191,6 +198,7 @@ class OcrService:
         *,
         cancel_check: Callable[[], bool] | None = None,
         language_tag: str | None = None,
+        preprocessing_profile: str = OCR_PREPROCESSING_AUTO,
     ) -> tuple[EngineResult | None, list[EngineResult], list[str], dict[str, bool]]:
         requested = engines if engines is not None else list(self.config.default_ocr_engines)
         results: list[EngineResult] = []
@@ -203,9 +211,14 @@ class OcrService:
 
         _raise_if_cancelled(cancel_check)
         normalized_language = str(language_tag or "").strip().lower()
+        normalized_preprocessing = _normalize_preprocessing_profile(
+            preprocessing_profile
+        )
+        force_pixel_art = normalized_preprocessing == OCR_PREPROCESSING_PIXEL_ART
         cache_key = (
             tuple(normalized_engines),
             normalized_language,
+            normalized_preprocessing,
             _image_fingerprint(image),
         )
         cached = self._cache.get(cache_key)
@@ -234,6 +247,7 @@ class OcrService:
                         recognition_image,
                         cancel_check,
                         language_tag,
+                        force_pixel_art=force_pixel_art,
                     )
                 )
                 results.extend(automatic_results)
@@ -246,6 +260,7 @@ class OcrService:
                             recognition_image,
                             max_variants=self.config.ocr_max_variants,
                             engine=engine,
+                            force_pixel_art=force_pixel_art,
                         ),
                     )
                     for engine in normalized_engines
@@ -313,12 +328,15 @@ class OcrService:
         image: Image.Image,
         cancel_check: Callable[[], bool] | None,
         language_tag: str | None,
+        *,
+        force_pixel_art: bool = False,
     ) -> tuple[list[EngineResult], list[str]]:
         fast_variants = {
             engine: preprocess_variants_for_ocr(
                 image,
                 max_variants=self.config.ocr_max_variants,
                 engine=engine,
+                force_pixel_art=force_pixel_art,
             )
             for engine in AUTOMATIC_FAST_ENGINES
         }
@@ -360,6 +378,7 @@ class OcrService:
             image,
             max_variants=self.config.ocr_max_variants,
             engine="paddleocr",
+            force_pixel_art=force_pixel_art,
         )
         paddle_results, paddle_warnings = self._detect_engine_variants(
             "paddleocr",
@@ -993,6 +1012,13 @@ class OcrService:
 
 def _base_engine(engine: str) -> str:
     return str(engine).split(":", 1)[0].strip().lower()
+
+
+def _normalize_preprocessing_profile(profile: str) -> str:
+    normalized = str(profile).strip().lower()
+    if normalized not in SUPPORTED_OCR_PREPROCESSING_PROFILES:
+        raise ValueError(f"unsupported OCR preprocessing profile: {profile}")
+    return normalized
 
 
 def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:

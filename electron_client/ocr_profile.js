@@ -1,10 +1,21 @@
-const OCR_ENGINES = new Set(['auto', 'windowsocr', 'tesseract', 'paddleocr', 'easyocr']);
+const OCR_ENGINES = new Set([
+    'auto',
+    'auto8bit',
+    'windowsocr',
+    'tesseract',
+    'paddleocr',
+    'easyocr'
+]);
 
 function resolveOcrEngines(profile) {
-    if (profile === 'auto') {
+    if (profile === 'auto' || profile === 'auto8bit') {
         return ['tesseract', 'windowsocr', 'paddleocr'];
     }
     return OCR_ENGINES.has(profile) ? [profile] : ['tesseract'];
 }
 
-module.exports = { OCR_ENGINES, resolveOcrEngines };
+function resolveOcrPreprocessing(profile) {
+    return profile === 'auto8bit' ? 'pixel-art' : 'auto';
+}
+
+module.exports = { OCR_ENGINES, resolveOcrEngines, resolveOcrPreprocessing };

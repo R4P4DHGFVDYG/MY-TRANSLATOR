@@ -193,3 +193,35 @@ def test_antialiased_gradient_is_not_classified_as_pixel_art():
         engine="tesseract",
     )
     assert [name for name, _variant in variants] == ["standard", "pixel"]
+
+
+def test_pixel_art_profile_forces_8_bit_variants_when_detection_is_uncertain():
+    image = Image.new("RGB", (96, 32))
+    for x in range(image.width):
+        shade = round(255 * x / (image.width - 1))
+        for y in range(image.height):
+            image.putpixel((x, y), (shade, shade, shade))
+
+    assert is_pixel_art_text(image) is False
+
+    tesseract_variants = preprocess_variants_for_ocr(
+        image,
+        max_variants=2,
+        engine="tesseract",
+        force_pixel_art=True,
+    )
+    paddle_variants = preprocess_variants_for_ocr(
+        image,
+        max_variants=2,
+        engine="paddleocr",
+        force_pixel_art=True,
+    )
+
+    assert [name for name, _variant in tesseract_variants] == [
+        "pixel",
+        "pixel-soft",
+    ]
+    assert [name for name, _variant in paddle_variants] == [
+        "standard",
+        "pixel-soft",
+    ]

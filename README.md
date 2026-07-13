@@ -16,7 +16,7 @@ O G.R.C Translator foi criado principalmente para traduzir legendas de jogos. Vo
 
 - seleção de uma área automática;
 - tradução exibida por cima do jogo;
-- modo automático ou escolha entre Windows OCR, Tesseract, PaddleOCR e EasyOCR;
+- modos Automático e Automático — 8 bits, além da escolha manual entre os OCRs;
 - atalho personalizado de teclado ou mouse;
 - cores, posição e transparência configuráveis;
 - suporte a mais de um monitor.
@@ -60,7 +60,7 @@ O aplicativo inicia o OCR local automaticamente e faz o aquecimento dos mecanism
 
 ## Como usar
 
-1. Deixe o OCR em **Automático** ou escolha o mecanismo desejado.
+1. Deixe o OCR em **Automático**. Em jogos com letras pixeladas, experimente **Automático — 8 bits**.
 2. Clique em **Definir área automática**.
 3. Marque a região onde as legendas aparecem.
 4. Volte ao jogo e aguarde a próxima legenda.

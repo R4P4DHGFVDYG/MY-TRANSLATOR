@@ -29,7 +29,13 @@ class DebugCapture:
         crop.save(self.directory / "crop.png")
         ocr_region = isolate_text_region(crop)
         ocr_region.save(self.directory / "ocr-region.png")
-        variants = preprocess_variants_for_ocr(ocr_region)
+        preprocessing_profile = str(
+            payload.get("ocrPreprocessing") or "auto"
+        ).strip().lower()
+        variants = preprocess_variants_for_ocr(
+            ocr_region,
+            force_pixel_art=preprocessing_profile == "pixel-art",
+        )
         variants[0][1].save(self.directory / "ocr-preprocessed.png")
         for variant_name, variant_image in variants:
             variant_image.save(self.directory / f"ocr-preprocessed-{variant_name}.png")
@@ -42,6 +48,7 @@ class DebugCapture:
                 "source": payload.get("source"),
                 "target": payload.get("target"),
                 "engines": payload.get("engines"),
+                "ocrPreprocessing": preprocessing_profile,
                 "debug": payload.get("debug"),
                 "imageDataUrlLength": len(str(payload.get("imageDataUrl") or "")),
                 "crop": crop_meta,

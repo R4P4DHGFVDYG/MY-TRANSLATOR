@@ -113,9 +113,10 @@ def preprocess_variants_for_ocr(
     *,
     max_variants: int = 0,
     engine: str = "tesseract",
+    force_pixel_art: bool = False,
 ) -> list[tuple[str, Image.Image]]:
     normalized_engine = str(engine).strip().lower()
-    pixel_art = is_pixel_art_text(image)
+    pixel_art = force_pixel_art or is_pixel_art_text(image)
     if normalized_engine == "windowsocr":
         if pixel_art:
             return _limited_variants(_pixel_art_variants(image), max_variants)

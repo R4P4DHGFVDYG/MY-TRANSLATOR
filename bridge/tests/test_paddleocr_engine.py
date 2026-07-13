@@ -11,6 +11,7 @@ from hq_ocr_bridge.config import BridgeConfig
 from hq_ocr_bridge.models import EngineResult
 from hq_ocr_bridge.ocr import (
     DEFAULT_ENGINES,
+    OCR_PREPROCESSING_PIXEL_ART,
     OcrCancelledError,
     OcrCapacityError,
     OcrService,
@@ -209,6 +210,79 @@ def test_automatic_profile_stops_after_first_variant_when_fast_engines_agree(
     assert best.text == "HELLO WORLD"
     assert calls == {"tesseract": 1, "windowsocr": 1, "paddleocr": 0}
     assert len(results) == 2
+
+
+def test_automatic_8_bit_profile_forces_pixel_variants_and_keeps_fast_consensus(
+    monkeypatch,
+):
+    service = OcrService(
+        BridgeConfig(ocr_max_variants=2, ocr_max_parallel_engines=2)
+    )
+    paddle_calls = 0
+
+    monkeypatch.setattr(
+        service,
+        "_run_tesseract",
+        lambda _image: EngineResult("tesseract", "HELLO WORLD", 0.95, 0.95),
+    )
+    monkeypatch.setattr(
+        service,
+        "_run_windowsocr",
+        lambda _image, _language=None: EngineResult(
+            "windowsocr", "HELLO WORLD", 0.0, None
+        ),
+    )
+
+    def fake_paddleocr(_image):
+        nonlocal paddle_calls
+        paddle_calls += 1
+        return EngineResult("paddleocr", "SHOULD NOT RUN", 0.99, 0.99)
+
+    monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["tesseract", "windowsocr", "paddleocr"],
+        preprocessing_profile=OCR_PREPROCESSING_PIXEL_ART,
+    )
+
+    assert warnings == []
+    assert best is not None
+    assert best.text == "HELLO WORLD"
+    assert paddle_calls == 0
+    assert {result.engine for result in results} == {
+        "tesseract:pixel",
+        "windowsocr:pixel",
+    }
+
+
+def test_ocr_cache_is_scoped_by_preprocessing_profile(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_max_variants=1))
+    calls = 0
+
+    def fake_tesseract(_image):
+        nonlocal calls
+        calls += 1
+        return EngineResult("tesseract", "HELLO WORLD", 0.95, 0.95)
+
+    monkeypatch.setattr(service, "_run_tesseract", fake_tesseract)
+    image = Image.new("RGB", (120, 40), "white")
+
+    _best, automatic_results, _warnings = service.detect_text(
+        image,
+        ["tesseract"],
+    )
+    _best, pixel_results, _warnings = service.detect_text(
+        image.copy(),
+        ["tesseract"],
+        preprocessing_profile=OCR_PREPROCESSING_PIXEL_ART,
+    )
+
+    assert calls == 2
+    assert [result.engine for result in automatic_results] == [
+        "tesseract:standard"
+    ]
+    assert [result.engine for result in pixel_results] == ["tesseract:pixel"]
 
 
 def test_automatic_profile_accepts_safe_punctuation_only_consensus(monkeypatch):

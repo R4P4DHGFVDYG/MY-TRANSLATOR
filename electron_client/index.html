@@ -608,6 +608,7 @@
                         <label for="ocrEngine">OCR utilizado</label>
                         <select id="ocrEngine">
                             <option value="auto" selected>Automático — recomendado</option>
+                            <option value="auto8bit">Automático — 8 bits</option>
                             <option value="windowsocr">Windows OCR — Nativo e rápido</option>
                             <option value="tesseract">Tesseract — Windows</option>
                             <option value="paddleocr">PaddleOCR — Inteligência artificial</option>
@@ -795,7 +796,7 @@
                 defaultShortcut: { type: 'keyboard', value: 'Ctrl+Shift+E' }
             }
         };
-        const allowedOcrEngines = new Set(['auto', 'windowsocr', 'tesseract', 'paddleocr', 'easyocr']);
+        const allowedOcrEngines = new Set(['auto', 'auto8bit', 'windowsocr', 'tesseract', 'paddleocr', 'easyocr']);
         const settingIds = [
             'source', 'target', 'ocrEngine', 'position', 'fontFamily', 'fontSize',
             'textAlign', 'textColor', 'bgColor', 'opacity'
@@ -958,6 +959,7 @@
         function updateOcrHint(engine) {
             const hints = {
                 auto: 'Usa Tesseract primeiro e consulta Windows OCR e PaddleOCR somente quando a leitura estiver incerta.',
+                auto8bit: 'Força o tratamento para fontes pixeladas, compara Tesseract e Windows OCR e usa PaddleOCR quando houver dúvida.',
                 windowsocr: 'Windows OCR é nativo, rápido e usa o pacote de idioma instalado no sistema.',
                 tesseract: 'Tesseract inicia mais rápido e funciona bem com fontes pixeladas.',
                 paddleocr: 'PaddleOCR pode reconhecer fontes difíceis, mas o primeiro uso demora mais.',

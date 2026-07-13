@@ -17,7 +17,13 @@ from .image_utils import (
     image_from_data_url,
 )
 from .libretranslate import LibreTranslateClient, TranslationResult
-from .ocr import OcrCancelledError, OcrCapacityError, OcrService
+from .ocr import (
+    OCR_PREPROCESSING_AUTO,
+    SUPPORTED_OCR_PREPROCESSING_PROFILES,
+    OcrCancelledError,
+    OcrCapacityError,
+    OcrService,
+)
 from .translation_text import prepare_text_for_translation
 
 
@@ -132,6 +138,7 @@ def create_app(
 
         try:
             engines = _requested_ocr_engines(payload, bridge_config)
+            preprocessing_profile = _requested_ocr_preprocessing_profile(payload)
         except ValueError as exc:
             return _error_response(str(exc), 400)
 
@@ -157,6 +164,7 @@ def create_app(
                 engines,
                 ticket,
                 source,
+                preprocessing_profile,
             )
         except OcrCancelledError:
             timings["ocrMs"] = _elapsed_ms(ocr_started_at)
@@ -363,14 +371,19 @@ def _detect_text(
     engines: list[str],
     ticket: RequestTicket,
     language_tag: str | None = None,
+    preprocessing_profile: str = OCR_PREPROCESSING_AUTO,
 ) -> tuple[Any, list[Any], list[str], dict[str, bool]]:
     detect_with_metadata = getattr(ocr, "detect_text_with_metadata", None)
     if callable(detect_with_metadata):
+        optional_kwargs: dict[str, Any] = {}
+        if preprocessing_profile != OCR_PREPROCESSING_AUTO:
+            optional_kwargs["preprocessing_profile"] = preprocessing_profile
         return detect_with_metadata(
             crop,
             engines,
             cancel_check=lambda: not ticket.is_current(),
             language_tag=language_tag,
+            **optional_kwargs,
         )
 
     best, engine_results, warnings = ocr.detect_text(crop, engines)
@@ -484,6 +497,21 @@ def _requested_ocr_engines(
     if len(engines) > config.max_ocr_engines:
         raise ValueError("too many OCR engines were requested")
     return engines
+
+
+def _requested_ocr_preprocessing_profile(payload: dict[str, Any]) -> str:
+    requested = payload.get("ocrPreprocessing", OCR_PREPROCESSING_AUTO)
+    if requested is None:
+        return OCR_PREPROCESSING_AUTO
+    if not isinstance(requested, str) or not requested.strip():
+        raise ValueError("ocrPreprocessing must be a non-empty string")
+
+    normalized = requested.strip().lower()
+    if normalized not in SUPPORTED_OCR_PREPROCESSING_PROFILES:
+        raise ValueError(
+            f"unsupported OCR preprocessing profile: {requested}"
+        )
+    return normalized
 
 
 def _translate(

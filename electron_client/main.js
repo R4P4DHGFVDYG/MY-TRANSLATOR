@@ -11,7 +11,11 @@ const {
 } = require('./fixed_area');
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
 const { normalizeFontFamily, normalizeFontSize, normalizeTextAlign } = require('./appearance');
-const { OCR_ENGINES, resolveOcrEngines } = require('./ocr_profile');
+const {
+    OCR_ENGINES,
+    resolveOcrEngines,
+    resolveOcrPreprocessing
+} = require('./ocr_profile');
 const { BridgeRuntime } = require('./bridge_runtime');
 
 const APP_NAME = 'G.R.C TRANSLATOR';
@@ -1294,6 +1298,7 @@ async function translateSelection(selection, anchorPoint, display, translationId
                 source: requestSettings.sourceLang,
                 target: requestSettings.targetLang,
                 engines: resolveOcrEngines(requestSettings.ocrEngine),
+                ocrPreprocessing: resolveOcrPreprocessing(requestSettings.ocrEngine),
                 clientId: CLIENT_ID,
                 requestId: translationId
             })
