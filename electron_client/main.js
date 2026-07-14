@@ -7,6 +7,7 @@ const {
     FixedAreaChangeTracker,
     createPerceptualSignature,
     rectanglesOverlap,
+    screenSelectorConfiguration,
     toastSizeForFixedArea
 } = require('./fixed_area');
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
@@ -777,17 +778,14 @@ async function startSnip(mode = 'fixed') {
     try {
         const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
         captureDisplay = display;
-        const { x, y, width, height } = display.bounds;
+        const selector = screenSelectorConfiguration(display.bounds);
         const currentSnip = new BrowserWindow({
-            x,
-            y,
-            width,
-            height,
+            ...selector.bounds,
             frame: false,
             transparent: true,
+            fullscreen: selector.fullscreen,
             alwaysOnTop: true,
             skipTaskbar: true,
-            enableLargerThanScreen: true,
             backgroundColor: '#00000000',
             show: false,
             webPreferences: getWebPreferences()
@@ -812,6 +810,10 @@ async function startSnip(mode = 'fixed') {
             return;
         }
 
+        currentSnip.setBounds(selector.bounds, false);
+        if (selector.fullscreen && !currentSnip.isFullScreen()) {
+            currentSnip.setFullScreen(true);
+        }
         showOverlay(currentSnip);
         publishFixedAreaState();
     } catch (error) {

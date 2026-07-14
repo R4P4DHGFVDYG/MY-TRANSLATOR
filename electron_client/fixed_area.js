@@ -307,6 +307,32 @@ function toastSizeForFixedArea(region, display, workArea, defaultSize) {
     };
 }
 
+function screenSelectorConfiguration(displayBounds, platform = process.platform) {
+    const source = displayBounds && typeof displayBounds === 'object'
+        ? displayBounds
+        : {};
+    const x = Number(source.x);
+    const y = Number(source.y);
+    const width = Number(source.width);
+    const height = Number(source.height);
+    if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+        throw new TypeError('A valid display bounds object is required.');
+    }
+
+    return {
+        bounds: {
+            x: Math.round(x),
+            y: Math.round(y),
+            width: Math.max(1, Math.round(width)),
+            height: Math.max(1, Math.round(height))
+        },
+        // On Windows, a borderless window sized to display.bounds can still be
+        // constrained above the taskbar. Real fullscreen keeps the entire monitor
+        // selectable, including pixels behind the taskbar.
+        fullscreen: platform === 'win32'
+    };
+}
+
 module.exports = {
     AdaptiveCaptureCadence,
     FixedAreaChangeTracker,
@@ -314,6 +340,7 @@ module.exports = {
     normalizeTemporalText,
     perceptualFrameDifference,
     rectanglesOverlap,
+    screenSelectorConfiguration,
     temporalTextSimilarity,
     toastSizeForFixedArea
 };

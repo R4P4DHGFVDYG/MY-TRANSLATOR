@@ -8,6 +8,7 @@ const {
     createPerceptualSignature,
     perceptualFrameDifference,
     rectanglesOverlap,
+    screenSelectorConfiguration,
     temporalTextSimilarity,
     toastSizeForFixedArea
 } = require('./fixed_area');
@@ -209,5 +210,29 @@ test('translation window is limited to the monitor work area', () => {
     assert.deepEqual(
         toastSizeForFixedArea(region, display, { width: 1366, height: 728 }, { width: 600, height: 200 }),
         { width: 1366, height: 728 }
+    );
+});
+
+test('Windows screen selector covers the full display instead of the work area', () => {
+    const displayBounds = { x: 0, y: 0, width: 1920, height: 1080 };
+    const configuration = screenSelectorConfiguration(displayBounds, 'win32');
+
+    assert.deepEqual(configuration, {
+        bounds: displayBounds,
+        fullscreen: true
+    });
+    assert.notEqual(configuration.bounds.height, 1032);
+});
+
+test('screen selector preserves secondary-monitor coordinates', () => {
+    assert.deepEqual(
+        screenSelectorConfiguration(
+            { x: -2560, y: -120, width: 2560, height: 1440 },
+            'linux'
+        ),
+        {
+            bounds: { x: -2560, y: -120, width: 2560, height: 1440 },
+            fullscreen: false
+        }
     );
 });
