@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import time
-
+import sys
 import threading
+import time
+from types import ModuleType
 
 from PIL import Image
 import pytest
 
 from hq_ocr_bridge.config import BridgeConfig
 from hq_ocr_bridge.models import EngineResult
+import hq_ocr_bridge.ocr as ocr_module
 from hq_ocr_bridge.ocr import (
     DEFAULT_ENGINES,
     OCR_PREPROCESSING_PIXEL_ART,
@@ -18,6 +20,24 @@ from hq_ocr_bridge.ocr import (
     _filtered_tesseract_words,
     _ordered_paddleocr_fragments,
 )
+
+
+def _install_fake_paddleocr(monkeypatch):
+    created: list[dict[str, object]] = []
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            created.append(kwargs)
+
+    paddleocr_module = ModuleType("paddleocr")
+    paddleocr_module.PaddleOCR = FakePaddleOCR
+    monkeypatch.setitem(sys.modules, "paddleocr", paddleocr_module)
+    monkeypatch.setattr(
+        ocr_module.importlib.util,
+        "find_spec",
+        lambda _name: object(),
+    )
+    return created
 
 
 def test_default_engine_uses_windows_tesseract():
@@ -109,7 +129,7 @@ def test_automatic_chain_continues_when_windows_ocr_is_unavailable(monkeypatch):
     def unavailable_windowsocr(_image, _language=None):
         raise RuntimeError("Windows OCR support is not installed")
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "HELLO", 0.95, 0.95)
@@ -151,7 +171,7 @@ def test_automatic_profile_runs_fast_engines_in_parallel_and_skips_paddle_on_con
         rendezvous.wait(timeout=1)
         return EngineResult("windowsocr", "HELLO WORLD", 0.0, None)
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "SHOULD NOT RUN", 0.99, 0.99)
@@ -192,7 +212,7 @@ def test_automatic_profile_stops_after_first_variant_when_fast_engines_agree(
         calls["windowsocr"] += 1
         return EngineResult("windowsocr", "HELLO WORLD", 0.0, None)
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         calls["paddleocr"] += 1
         return EngineResult("paddleocr", "SHOULD NOT RUN", 0.99, 0.99)
 
@@ -237,7 +257,7 @@ def test_automatic_8_bit_profile_forces_pixel_variants_and_keeps_fast_consensus(
         ),
     )
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "SHOULD NOT RUN", 0.99, 0.99)
@@ -309,7 +329,7 @@ def test_automatic_profile_accepts_safe_punctuation_only_consensus(monkeypatch):
         calls["windowsocr"] += 1
         return EngineResult("windowsocr", "Hello brave world", 0.0, None)
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         calls["paddleocr"] += 1
         return EngineResult("paddleocr", "SHOULD NOT RUN", 0.99, 0.99)
 
@@ -353,7 +373,7 @@ def test_automatic_profile_accepts_one_safe_letter_difference_in_long_text(
             None,
         )
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         calls["paddleocr"] += 1
         return EngineResult("paddleocr", "SHOULD NOT RUN", 0.99, 0.99)
 
@@ -393,7 +413,7 @@ def test_automatic_profile_sends_digit_letter_disagreement_to_paddle(monkeypatch
         ),
     )
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", expected, 0.98, 0.98)
@@ -430,7 +450,7 @@ def test_automatic_profile_sends_short_one_letter_disagreement_to_paddle(
         ),
     )
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "Take it", 0.98, 0.98)
@@ -465,7 +485,7 @@ def test_automatic_profile_uses_paddle_when_fast_engines_disagree(monkeypatch):
         ),
     )
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "HELLO WORLD", 0.96, 0.96)
@@ -503,7 +523,7 @@ def test_automatic_profile_verifies_suspicious_fast_consensus_with_paddle(
         ),
     )
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "HELLO", 0.97, 0.97)
@@ -523,8 +543,10 @@ def test_automatic_profile_verifies_suspicious_fast_consensus_with_paddle(
 
 def test_paddleocr_engine_can_be_requested(monkeypatch):
     service = OcrService(BridgeConfig())
+    languages: list[str | None] = []
 
-    def fake_paddleocr(image):
+    def fake_paddleocr(image, language_tag=None):
+        languages.append(language_tag)
         return EngineResult("paddleocr", "HELLO WORLD", 0.9, 0.9)
 
     monkeypatch.setattr(service, "_run_paddleocr", fake_paddleocr)
@@ -532,12 +554,68 @@ def test_paddleocr_engine_can_be_requested(monkeypatch):
     best, results, warnings = service.detect_text(
         Image.new("RGB", (120, 40), "white"),
         ["paddleocr"],
+        language_tag="pt-BR",
     )
 
     assert warnings == []
     assert best is not None
     assert best.text == "HELLO WORLD"
+    assert languages == ["pt-BR"]
     assert [result.engine for result in results] == ["paddleocr:standard"]
+
+
+def test_paddleocr_selects_and_reuses_recognition_model_by_language(monkeypatch):
+    created = _install_fake_paddleocr(monkeypatch)
+    service = OcrService(BridgeConfig())
+    monkeypatch.setattr(service, "_configure_paddleocr_environment", lambda: None)
+
+    english = service._get_paddleocr_reader("en")
+    portuguese = service._get_paddleocr_reader("pt-BR")
+
+    assert english is service._get_paddleocr_reader("en-US")
+    assert portuguese is service._get_paddleocr_reader("pt")
+    assert english is not portuguese
+    assert [item["text_recognition_model_name"] for item in created] == [
+        "en_PP-OCRv5_mobile_rec",
+        "latin_PP-OCRv5_mobile_rec",
+    ]
+    assert {
+        item["text_detection_model_name"] for item in created
+    } == {"PP-OCRv5_mobile_det"}
+
+    health = service._paddleocr_health()
+    assert health["languageAware"] is True
+    assert health["loadedLanguages"] == ["en", "pt"]
+    assert health["loadedReaderCount"] == 2
+
+
+def test_paddleocr_preserves_a_custom_named_model_for_every_language(monkeypatch):
+    created = _install_fake_paddleocr(monkeypatch)
+    service = OcrService(
+        BridgeConfig(
+            paddleocr_detection_model="custom-det",
+            paddleocr_recognition_model="custom-rec",
+        )
+    )
+    monkeypatch.setattr(service, "_configure_paddleocr_environment", lambda: None)
+
+    english = service._get_paddleocr_reader("en")
+    portuguese = service._get_paddleocr_reader("pt-BR")
+
+    assert english is portuguese
+    assert created == [
+        {
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+            "text_detection_model_name": "custom-det",
+            "text_recognition_model_name": "custom-rec",
+        }
+    ]
+    health = service._paddleocr_health()
+    assert health["languageAware"] is False
+    assert health["loadedLanguages"] == ["en", "pt"]
+    assert health["loadedReaderCount"] == 1
 
 
 def test_tesseract_filters_large_portrait_artifacts_and_detached_noise():
@@ -639,7 +717,7 @@ def test_adaptive_engine_chain_skips_fallback_for_reliable_primary(monkeypatch):
         lambda _image: EngineResult("tesseract", "CLEAR SUBTITLE", 0.95, 0.95),
     )
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "UNNECESSARY", 0.99, 0.99)
@@ -674,7 +752,7 @@ def test_adaptive_engine_chain_uses_fallback_when_tesseract_variants_disagree(
         text = "S50 WHAT" if tesseract_calls == 1 else "SO WHAT"
         return EngineResult("tesseract", text, 0.95, 0.95)
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "SO WHAT", 0.94, 0.96)
@@ -736,7 +814,7 @@ def test_empty_second_tesseract_variant_allows_paddle_fallback(monkeypatch):
         confidence = 0.95 if text else 0.0
         return EngineResult("tesseract", text, confidence, confidence)
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "CLEAR SUBTITLE", 0.95, 0.95)
@@ -767,7 +845,7 @@ def test_adaptive_engine_chain_uses_fallback_for_uncertain_primary(monkeypatch):
         lambda _image: EngineResult("tesseract", "H3LL0", 0.4, 0.4),
     )
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "HELLO", 0.95, 0.95)
@@ -801,7 +879,7 @@ def test_single_variant_override_accepts_reliable_tesseract(monkeypatch):
         lambda _image: EngineResult("tesseract", "CLEAR SUBTITLE", 0.95, 0.95),
     )
 
-    def fake_paddleocr(_image):
+    def fake_paddleocr(_image, _language=None):
         nonlocal paddle_calls
         paddle_calls += 1
         return EngineResult("paddleocr", "UNNECESSARY", 0.99, 0.99)
@@ -862,7 +940,11 @@ def test_paddleocr_orders_fragments_by_visual_lines(monkeypatch):
                 }
             ]
 
-    monkeypatch.setattr(service, "_get_paddleocr_reader", lambda: FakeReader())
+    monkeypatch.setattr(
+        service,
+        "_get_paddleocr_reader",
+        lambda _language=None: FakeReader(),
+    )
 
     result = service._run_paddleocr(Image.new("RGB", (240, 120), "white"))
 
@@ -1017,7 +1099,7 @@ def test_ocr_cache_skips_unchanged_pixels(monkeypatch):
     service = OcrService(BridgeConfig())
     calls = 0
 
-    def fake_paddleocr(image):
+    def fake_paddleocr(image, _language=None):
         nonlocal calls
         calls += 1
         return EngineResult("paddleocr", "HELLO WORLD", 0.9, 0.9)
@@ -1038,7 +1120,7 @@ def test_ocr_cache_can_be_bypassed_for_fresh_temporal_confirmation(monkeypatch):
     service = OcrService(BridgeConfig(ocr_max_variants=1))
     calls = 0
 
-    def fake_paddleocr(image):
+    def fake_paddleocr(image, _language=None):
         nonlocal calls
         calls += 1
         return EngineResult("paddleocr", "HELLO WORLD", 0.9, 0.9)
@@ -1063,7 +1145,7 @@ def test_ocr_cache_does_not_freeze_transient_engine_failures(monkeypatch):
     service = OcrService(BridgeConfig(ocr_max_variants=1))
     calls = 0
 
-    def recovering_paddleocr(image):
+    def recovering_paddleocr(image, _language=None):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -1116,7 +1198,7 @@ def test_completed_single_variant_is_cached_even_if_response_is_cancelled(monkey
     cancelled = False
     calls = 0
 
-    def fake_paddleocr(image):
+    def fake_paddleocr(image, _language=None):
         nonlocal cancelled, calls
         calls += 1
         cancelled = True
@@ -1143,7 +1225,7 @@ def test_completed_single_variant_is_cached_even_if_response_is_cancelled(monkey
 def test_ocr_engine_timeout_returns_warning(monkeypatch):
     service = OcrService(BridgeConfig(ocr_engine_timeout_seconds=0.01))
 
-    def slow_paddleocr(image):
+    def slow_paddleocr(image, _language=None):
         time.sleep(0.1)
         return EngineResult("paddleocr", "HELLO WORLD", 0.9, 0.9)
 

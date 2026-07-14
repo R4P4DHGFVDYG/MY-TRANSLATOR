@@ -39,6 +39,13 @@ SUPPORTED_OCR_PREPROCESSING_PROFILES = frozenset(
 AUTOMATIC_NEAR_CONSENSUS_MIN_LENGTH = 20
 AUTOMATIC_NEAR_CONSENSUS_SIMILARITY = 0.96
 AUTOMATIC_NEAR_CONSENSUS_WINDOWS_SCORE = 0.60
+PADDLEOCR_LANGUAGE_RECOGNITION_MODELS = {
+    "en": "en_PP-OCRv5_mobile_rec",
+    "pt": "latin_PP-OCRv5_mobile_rec",
+}
+PADDLEOCR_DEFAULT_RECOGNITION_MODEL = (
+    PADDLEOCR_LANGUAGE_RECOGNITION_MODELS["en"]
+)
 SUPPORTED_ENGINES = frozenset(
     {"windowsocr", "easyocr", "paddleocr", "tesseract"}
 )
@@ -56,9 +63,11 @@ class OcrService:
     def __init__(self, config: BridgeConfig) -> None:
         self.config = config
         self._easyocr_reader: Any | None = None
-        self._paddleocr_reader: Any | None = None
+        self._paddleocr_readers: dict[str, Any] = {}
+        self._paddleocr_loaded_languages: set[str] = set()
         self._windowsocr_adapter: WindowsOcrAdapter | None = None
         self._easyocr_lock = threading.Lock()
+        self._paddleocr_reader_lock = threading.Lock()
         self._paddleocr_lock = threading.Lock()
         self._windowsocr_lock = threading.Lock()
         self._warmup_timings_lock = threading.Lock()
@@ -741,7 +750,7 @@ class OcrService:
         if normalized_engine == "easyocr":
             return self._run_easyocr(image)
         if normalized_engine == "paddleocr":
-            return self._run_paddleocr(image)
+            return self._run_paddleocr(image, language_tag)
         return self._run_tesseract(image)
 
     def _run_windowsocr(
@@ -817,11 +826,15 @@ class OcrService:
 
         return self._easyocr_reader
 
-    def _run_paddleocr(self, image: Image.Image) -> EngineResult:
+    def _run_paddleocr(
+        self,
+        image: Image.Image,
+        language_tag: str | None = None,
+    ) -> EngineResult:
         import numpy as np
 
         image = _limit_image_pixels(image, self.config.paddleocr_max_pixels)
-        reader = self._get_paddleocr_reader()
+        reader = self._get_paddleocr_reader(language_tag)
 
         with self._paddleocr_lock:
             detections = reader.predict(np.asarray(image.convert("RGB")))
@@ -837,9 +850,15 @@ class OcrService:
         confidence = sum(confidences) / len(confidences) if confidences else 0.0
         return EngineResult("paddleocr", " ".join(fragments), confidence, confidence)
 
-    def _get_paddleocr_reader(self) -> Any:
-        if self._paddleocr_reader is not None:
-            return self._paddleocr_reader
+    def _get_paddleocr_reader(self, language_tag: str | None = None) -> Any:
+        language, reader_key, kwargs = self._paddleocr_reader_configuration(
+            language_tag
+        )
+        with self._paddleocr_reader_lock:
+            reader = self._paddleocr_readers.get(reader_key)
+            if reader is not None:
+                self._paddleocr_loaded_languages.add(language)
+                return reader
 
         if importlib.util.find_spec("paddleocr") is None:
             raise RuntimeError("paddleocr package is not installed")
@@ -848,27 +867,43 @@ class OcrService:
 
         from paddleocr import PaddleOCR
 
-        with self._paddleocr_lock:
-            if self._paddleocr_reader is None:
-                kwargs: dict[str, Any] = dict(
-                    use_doc_orientation_classify=False,
-                    use_doc_unwarping=False,
-                    use_textline_orientation=False,
+        with self._paddleocr_reader_lock:
+            reader = self._paddleocr_readers.get(reader_key)
+            if reader is None:
+                reader = PaddleOCR(**kwargs)
+                self._paddleocr_readers[reader_key] = reader
+            self._paddleocr_loaded_languages.add(language)
+            return reader
+
+    def _paddleocr_reader_configuration(
+        self,
+        language_tag: str | None,
+    ) -> tuple[str, str, dict[str, Any]]:
+        requested = str(language_tag or self.config.paddleocr_lang).strip()
+        language = requested.replace("_", "-").split("-", 1)[0].lower()
+        kwargs: dict[str, Any] = {
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+        }
+
+        if self.config.paddleocr_detection_model:
+            detection_model = self.config.paddleocr_detection_model
+            recognition_model = self.config.paddleocr_recognition_model
+            if recognition_model == PADDLEOCR_DEFAULT_RECOGNITION_MODEL:
+                recognition_model = PADDLEOCR_LANGUAGE_RECOGNITION_MODELS.get(
+                    language,
+                    recognition_model,
                 )
-                if self.config.paddleocr_detection_model:
-                    kwargs["text_detection_model_name"] = (
-                        self.config.paddleocr_detection_model
-                    )
-                    kwargs["text_recognition_model_name"] = (
-                        self.config.paddleocr_recognition_model
-                    )
-                else:
-                    kwargs["lang"] = self.config.paddleocr_lang
-                    kwargs["ocr_version"] = self.config.paddleocr_ocr_version
+            kwargs["text_detection_model_name"] = detection_model
+            kwargs["text_recognition_model_name"] = recognition_model
+            reader_key = f"models:{detection_model}:{recognition_model}"
+        else:
+            kwargs["lang"] = language
+            kwargs["ocr_version"] = self.config.paddleocr_ocr_version
+            reader_key = f"language:{language}:{self.config.paddleocr_ocr_version}"
 
-                self._paddleocr_reader = PaddleOCR(**kwargs)
-
-        return self._paddleocr_reader
+        return language, reader_key, kwargs
 
     def _configure_paddleocr_environment(self) -> None:
         os.environ["PADDLE_PDX_CACHE_HOME"] = os.path.abspath(
@@ -982,6 +1017,14 @@ class OcrService:
     def _paddleocr_health(self) -> dict[str, Any]:
         installed = importlib.util.find_spec("paddleocr") is not None
         cache_dir = os.path.abspath(self.config.paddleocr_cache_dir)
+        with self._paddleocr_reader_lock:
+            loaded_languages = sorted(self._paddleocr_loaded_languages)
+            loaded_reader_count = len(self._paddleocr_readers)
+        language_aware = (
+            not self.config.paddleocr_detection_model
+            or self.config.paddleocr_recognition_model
+            == PADDLEOCR_DEFAULT_RECOGNITION_MODEL
+        )
         return {
             "installed": installed,
             "language": self.config.paddleocr_lang,
@@ -997,7 +1040,15 @@ class OcrService:
             "cacheDirectoryExists": os.path.isdir(cache_dir),
             "mkldnnEnabled": self.config.paddleocr_enable_mkldnn,
             "maxPixels": self.config.paddleocr_max_pixels,
-            "loaded": self._paddleocr_reader is not None,
+            "languageAware": language_aware,
+            "recognitionModelsByLanguage": (
+                dict(PADDLEOCR_LANGUAGE_RECOGNITION_MODELS)
+                if language_aware and self.config.paddleocr_detection_model
+                else {}
+            ),
+            "loaded": loaded_reader_count > 0,
+            "loadedLanguages": loaded_languages,
+            "loadedReaderCount": loaded_reader_count,
         }
 
     def _windowsocr_health(self) -> dict[str, Any]:
