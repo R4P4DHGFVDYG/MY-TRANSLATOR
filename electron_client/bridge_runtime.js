@@ -24,11 +24,30 @@ function resolveBridgeLaunch(options = {}) {
         path.resolve(baseDir, '..', 'bridge'),
         resourcesPath ? path.join(resourcesPath, 'bridge') : ''
     ]);
-    const bridgeDir = bridgeCandidates.find(candidate => (
-        existsSync(path.join(candidate, 'hq_ocr_bridge', '__main__.py'))
-    ));
-    if (!bridgeDir) {
+    const packagedExecutableName = platform === 'win32'
+        ? 'hq-ocr-bridge.exe'
+        : 'hq-ocr-bridge';
+    const bridgeLayout = bridgeCandidates
+        .map(bridgeDir => ({
+            bridgeDir,
+            packagedExecutable: path.join(bridgeDir, packagedExecutableName),
+            sourceEntrypoint: path.join(bridgeDir, 'hq_ocr_bridge', '__main__.py')
+        }))
+        .find(layout => (
+            existsSync(layout.packagedExecutable)
+            || existsSync(layout.sourceEntrypoint)
+        ));
+    if (!bridgeLayout) {
         throw new Error('OCR Bridge files were not found beside the Electron application');
+    }
+
+    const { bridgeDir } = bridgeLayout;
+    if (existsSync(bridgeLayout.packagedExecutable)) {
+        return {
+            command: bridgeLayout.packagedExecutable,
+            args: [],
+            cwd: bridgeDir
+        };
     }
 
     const explicitPython = String(env.HQ_OCR_BRIDGE_PYTHON || '').trim();

@@ -62,6 +62,25 @@ test('resolves the development bridge virtual environment', () => {
     assert.deepEqual(launch.args, ['-m', 'hq_ocr_bridge']);
 });
 
+test('resolves the self-contained bridge from packaged resources', () => {
+    const baseDir = path.join('C:\\Program Files', 'GRC Translator', 'resources', 'app.asar');
+    const resourcesPath = path.join('C:\\Program Files', 'GRC Translator', 'resources');
+    const bridgeDir = path.join(resourcesPath, 'bridge');
+    const executable = path.join(bridgeDir, 'hq-ocr-bridge.exe');
+
+    const launch = resolveBridgeLaunch({
+        baseDir,
+        resourcesPath,
+        env: {},
+        platform: 'win32',
+        existsSync: candidate => path.normalize(candidate) === path.normalize(executable)
+    });
+
+    assert.equal(launch.command, executable);
+    assert.equal(launch.cwd, bridgeDir);
+    assert.deepEqual(launch.args, []);
+});
+
 test('reuses a bridge that is already running without spawning another process', async () => {
     let spawnCalls = 0;
     const runtime = new BridgeRuntime({

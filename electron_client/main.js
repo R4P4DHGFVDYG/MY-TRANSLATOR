@@ -313,7 +313,9 @@ function startSideMouseShortcut() {
         return;
     }
 
-    const hookPath = path.join(__dirname, 'mouse_hook.ps1');
+    const hookPath = app.isPackaged
+        ? path.join(process.resourcesPath, 'mouse_hook.ps1')
+        : path.join(__dirname, 'mouse_hook.ps1');
     const hookProcess = spawn(getPowerShellPath(), [
         '-NoProfile',
         '-ExecutionPolicy',
