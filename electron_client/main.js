@@ -643,7 +643,6 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             webPreferences: getWebPreferences()
         });
         hardenWindow(currentToast);
-        currentToast.setContentProtection(true);
         toastWindow = currentToast;
         toastReady = false;
 
