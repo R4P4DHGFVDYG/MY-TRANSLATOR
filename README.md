@@ -28,7 +28,7 @@ O G.R.C Translator foi criado principalmente para traduzir legendas de jogos. Vo
 
 ## Baixar e instalar
 
-A versão atual é a **1.0.1** para Windows de 64 bits.
+A versão atual é a **1.0.0** para Windows de 64 bits.
 
 1. Baixe `GRC-Translator-Setup-1.0.0.exe`.
 2. Abra o instalador e escolha a pasta de destino.
