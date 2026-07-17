@@ -28,9 +28,9 @@ O G.R.C Translator foi criado principalmente para traduzir legendas de jogos. Vo
 
 ## Baixar e instalar
 
-A versão atual é a **1.0.0** para Windows de 64 bits.
+A versão atual é a **1.0.2** para Windows de 64 bits.
 
-1. Baixe `GRC-Translator-Setup-1.0.0.exe`.
+1. Baixe `GRC-Translator-Setup-1.0.2.exe`.
 2. Abra o instalador e escolha a pasta de destino.
 3. Inicie o **G.R.C TRANSLATOR** pelo atalho da área de trabalho ou do menu Iniciar.
 
@@ -55,6 +55,8 @@ Para traduzir somente uma tela ou uma legenda, use o atalho de **Área temporár
 - **Automático:** compara os mecanismos rápidos e usa o PaddleOCR quando a leitura fica incerta;
 - **Windows OCR, Tesseract e EasyOCR:** podem ser selecionados individualmente para comparação;
 - **Paddle OCR (Recomendado)** foi o que desempenhou maiores resultados nos testes
+
+**Recomendo testar cada um pra ver qual se adapata melhor**
 
 O primeiro uso do PaddleOCR ou EasyOCR pode levar um pouco mais de tempo.
 
