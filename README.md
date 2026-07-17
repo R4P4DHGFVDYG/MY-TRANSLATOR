@@ -56,7 +56,7 @@ Para traduzir somente uma tela ou uma legenda, use o atalho de **Área temporár
 - **Windows OCR, Tesseract e EasyOCR:** podem ser selecionados individualmente para comparação;
 - **Paddle OCR (Recomendado)** foi o que desempenhou maiores resultados nos testes
 
-**Recomendo testar cada um pra ver qual se adapata melhor**
+**Recomendo testar cada um pra ver qual se adapata melhor.**
 
 O primeiro uso do PaddleOCR ou EasyOCR pode levar um pouco mais de tempo.
 
