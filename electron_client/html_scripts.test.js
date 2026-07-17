@@ -26,6 +26,8 @@ test('translation overlay keeps capture fallback and responsive overflow guards'
     const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
     const toastHtml = fs.readFileSync(path.join(__dirname, 'toast.html'), 'utf8');
     assert.match(indexHtml, /id="overlayAreaButton"/);
+    assert.doesNotMatch(indexHtml, /id="position"/);
+    assert.doesNotMatch(indexHtml, /getElementById\(['"]position['"]\)/);
     assert.doesNotMatch(indexHtml, /auto8bit|Automático — 8 bits/);
     assert.match(indexHtml, /getOverlayAreaState\(\)/);
     assert.match(indexHtml, /Usando a área de captura como padrão/);

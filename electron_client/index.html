@@ -728,20 +728,10 @@
                     </div>
                     <div>
                         <div class="panel-title">Aparência da legenda</div>
-                        <div class="panel-description">Fonte, alinhamento, posição, cores e transparência</div>
+                        <div class="panel-description">Fonte, alinhamento, cores e transparência</div>
                     </div>
                 </div>
-                <div class="field-grid" style="margin-bottom: 12px;">
-                    <div class="field">
-                        <label for="position">Posição na tela</label>
-                        <select id="position">
-                            <option value="custom" selected>Personalizada — arraste a legenda</option>
-                            <option value="mouse">Perto do mouse</option>
-                            <option value="top">Topo da tela</option>
-                            <option value="bottom">Rodapé da tela</option>
-                            <option value="center">Centro da tela</option>
-                        </select>
-                    </div>
+                <div class="field-grid single" style="margin-bottom: 12px;">
                     <div class="field">
                         <label for="fontFamily">Estilo da fonte</label>
                         <select id="fontFamily">
@@ -866,7 +856,7 @@
         };
         const allowedOcrEngines = new Set(['auto', 'windowsocr', 'tesseract', 'paddleocr', 'easyocr']);
         const settingIds = [
-            'source', 'target', 'ocrEngine', 'position', 'fontFamily', 'fontSize',
+            'source', 'target', 'ocrEngine', 'fontFamily', 'fontSize',
             'textAlign', 'textColor', 'bgColor', 'opacity'
         ];
         let recordingShortcutAction = null;
@@ -1037,14 +1027,9 @@
                 if (!stored || typeof stored !== 'object') {
                     return;
                 }
-                const allowedValues = {
-                    position: new Set(['custom', 'mouse', 'top', 'bottom', 'center']),
-                    textAlign: new Set(['left', 'center', 'right'])
-                };
-                for (const id of ['position', 'textAlign']) {
-                    if (allowedValues[id].has(stored[id])) {
-                        document.getElementById(id).value = stored[id];
-                    }
+                const allowedTextAlignments = new Set(['left', 'center', 'right']);
+                if (allowedTextAlignments.has(stored.textAlign)) {
+                    document.getElementById('textAlign').value = stored.textAlign;
                 }
                 for (const id of ['textColor', 'bgColor']) {
                     if (/^#[0-9a-f]{6}$/i.test(stored[id])) {
@@ -1095,7 +1080,6 @@
             const label = document.getElementById('overlayAreaButtonLabel');
             const status = document.getElementById('overlayAreaStatus');
             const resetButton = document.getElementById('overlayAreaResetButton');
-            const position = document.getElementById('position');
             const configured = Boolean(state?.configured);
             const editing = Boolean(state?.editing);
             const width = Math.round(Number(state?.bounds?.width) || 0);
@@ -1115,15 +1099,6 @@
                     ? `${width} × ${height}px${displayLabel ? ` · ${displayLabel}` : ''}`
                     : 'Usando a área de captura como padrão.';
             resetButton.hidden = !configured || editing;
-            position.disabled = configured;
-            position.title = configured
-                ? 'A posição é controlada pela área da tradução configurada.'
-                : '';
-            if (configured) {
-                position.setAttribute('aria-describedby', 'overlayAreaStatus');
-            } else {
-                position.removeAttribute('aria-describedby');
-            }
         }
 
         function updateVisualValues() {
@@ -1153,7 +1128,6 @@
                     target: document.getElementById('target').value
                 }));
                 localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify({
-                    position: document.getElementById('position').value,
                     fontFamily: document.getElementById('fontFamily').value,
                     fontSize: Number(document.getElementById('fontSize').value),
                     textAlign: document.getElementById('textAlign').value,
@@ -1168,7 +1142,6 @@
                 sourceLang: document.getElementById('source').value,
                 targetLang: document.getElementById('target').value,
                 ocrEngine,
-                position: document.getElementById('position').value,
                 fontFamily: document.getElementById('fontFamily').value,
                 fontSize: Number(document.getElementById('fontSize').value),
                 textAlign: document.getElementById('textAlign').value,
