@@ -3,6 +3,68 @@
 // Calibrated on real typewriter-style subtitles: small enough to catch added
 // letters while still ignoring isolated pixel noise and identical frames.
 const DEFAULT_FRAME_DIFFERENCE_THRESHOLD = 0.003;
+const TEMPORAL_CANDIDATE_LIMIT = 2;
+
+class LatestTaskQueue {
+    constructor(worker, onError = null) {
+        if (typeof worker !== 'function') {
+            throw new TypeError('LatestTaskQueue requires a worker function.');
+        }
+        this.worker = worker;
+        this.onError = typeof onError === 'function'
+            ? onError
+            : error => console.error('Latest task queue worker failed:', error);
+        this.running = false;
+        this.pending = null;
+        this.idlePromise = Promise.resolve();
+        this.resolveIdle = null;
+    }
+
+    enqueue(task) {
+        if (this.running) {
+            const replaced = this.pending !== null;
+            this.pending = task;
+            return { started: false, replaced };
+        }
+
+        this.running = true;
+        this.idlePromise = new Promise(resolve => {
+            this.resolveIdle = resolve;
+        });
+        void this.drain(task);
+        return { started: true, replaced: false };
+    }
+
+    clearPending() {
+        const cleared = this.pending !== null;
+        this.pending = null;
+        return cleared;
+    }
+
+    whenIdle() {
+        return this.idlePromise;
+    }
+
+    async drain(initialTask) {
+        let task = initialTask;
+        while (task !== null) {
+            try {
+                await this.worker(task);
+            } catch (error) {
+                this.onError(error);
+            }
+            task = this.pending;
+            this.pending = null;
+        }
+
+        this.running = false;
+        const resolve = this.resolveIdle;
+        this.resolveIdle = null;
+        if (resolve) {
+            resolve();
+        }
+    }
+}
 
 class AdaptiveCaptureCadence {
     constructor(options = {}) {
@@ -64,8 +126,8 @@ class FixedAreaChangeTracker {
         this.lastDigest = '';
         this.lastText = '';
         this.lastTextKey = '';
-        this.pendingText = '';
-        this.pendingTextKey = '';
+        this.pendingCandidates = [];
+        this.blankFrameCount = 0;
         this.lastFrameSignature = null;
         this.lastFrameDifference = 1;
         this.forceNextFrame = false;
@@ -133,43 +195,79 @@ class FixedAreaChangeTracker {
     ) {
         const normalized = typeof text === 'string' ? text.trim() : '';
         if (!normalized) {
-            this.lastText = '';
-            this.lastTextKey = '';
-            this.pendingText = '';
-            this.pendingTextKey = '';
+            this.clearRecognizedText();
             return { display: false, retry: false };
         }
 
+        this.blankFrameCount = 0;
         const textKey = normalizeTemporalText(normalized);
         if (!textKey) {
-            this.pendingText = '';
-            this.pendingTextKey = '';
+            this.pendingCandidates = [];
             return { display: false, retry: false };
         }
         if (textKey === this.lastTextKey) {
-            this.pendingText = '';
-            this.pendingTextKey = '';
+            this.pendingCandidates = [];
             return { display: false, retry: false };
         }
 
         const numericScore = Number(score);
         const reliable = Number.isFinite(numericScore) && numericScore >= confidenceThreshold;
-        const temporallyConfirmed = areTemporalMatches(
-            textKey,
-            this.pendingTextKey,
-            temporalSimilarityThreshold
+        const temporallyConfirmed = this.pendingCandidates.some(
+            candidate => areTemporalMatches(
+                textKey,
+                candidate.key,
+                temporalSimilarityThreshold
+            )
         );
         if (reliable || temporallyConfirmed) {
             this.lastText = normalized;
             this.lastTextKey = textKey;
-            this.pendingText = '';
-            this.pendingTextKey = '';
+            this.pendingCandidates = [];
             return { display: true, retry: false };
         }
 
-        this.pendingText = normalized;
-        this.pendingTextKey = textKey;
+        this.pendingCandidates.push({ text: normalized, key: textKey });
+        if (this.pendingCandidates.length > TEMPORAL_CANDIDATE_LIMIT) {
+            this.pendingCandidates.shift();
+        }
         return { display: false, retry: true };
+    }
+
+    noteBlank(maxConsecutiveFrames = 2) {
+        const numericLimit = Number(maxConsecutiveFrames);
+        const limit = Number.isFinite(numericLimit)
+            ? Math.max(1, Math.floor(numericLimit))
+            : 2;
+        this.blankFrameCount += 1;
+        return this.blankFrameCount >= limit;
+    }
+
+    evaluateBlank(maxConsecutiveFrames = 2) {
+        const shouldClear = this.noteBlank(maxConsecutiveFrames);
+        const consecutiveEmptyResults = this.blankFrameCount;
+        if (shouldClear) {
+            this.clearRecognizedText();
+            this.forceNextFrame = false;
+            return {
+                clear: true,
+                retry: false,
+                consecutiveEmptyResults
+            };
+        }
+
+        this.retryCurrentFrame();
+        return {
+            clear: false,
+            retry: true,
+            consecutiveEmptyResults
+        };
+    }
+
+    clearRecognizedText() {
+        this.lastText = '';
+        this.lastTextKey = '';
+        this.pendingCandidates = [];
+        this.blankFrameCount = 0;
     }
 
     retryCurrentFrame() {
@@ -202,10 +300,22 @@ function perceptualFrameDifference(left, right) {
         return 1;
     }
 
+    const brightnessDeltas = new Int16Array(first.length);
+    for (let index = 0; index < first.length; index += 1) {
+        brightnessDeltas[index] = second[index] - first[index];
+    }
+    brightnessDeltas.sort();
+    const middle = Math.floor(brightnessDeltas.length / 2);
+    const globalBrightnessShift = brightnessDeltas.length % 2 === 0
+        ? (brightnessDeltas[middle - 1] + brightnessDeltas[middle]) / 2
+        : brightnessDeltas[middle];
+
     let absoluteDifference = 0;
     let substantiallyChanged = 0;
     for (let index = 0; index < first.length; index += 1) {
-        const difference = Math.abs(first[index] - second[index]);
+        const difference = Math.abs(
+            first[index] + globalBrightnessShift - second[index]
+        );
         absoluteDifference += difference;
         if (difference >= 24) {
             substantiallyChanged += 1;
@@ -336,6 +446,7 @@ function screenSelectorConfiguration(displayBounds, platform = process.platform)
 module.exports = {
     AdaptiveCaptureCadence,
     FixedAreaChangeTracker,
+    LatestTaskQueue,
     createPerceptualSignature,
     normalizeTemporalText,
     perceptualFrameDifference,

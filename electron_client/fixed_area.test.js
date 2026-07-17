@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const {
     AdaptiveCaptureCadence,
     FixedAreaChangeTracker,
+    LatestTaskQueue,
     createPerceptualSignature,
     perceptualFrameDifference,
     rectanglesOverlap,
@@ -61,6 +62,19 @@ test('perceptual frame tracking ignores isolated animation noise', () => {
     assert.equal(tracker.lastFrameDifference < 0.003, true);
     assert.equal(tracker.updateFrameSignature(subtitleChange), true);
     assert.equal(tracker.lastFrameDifference >= 0.003, true);
+});
+
+test('perceptual frame tracking ignores uniform lighting changes', () => {
+    const tracker = new FixedAreaChangeTracker();
+    const baseline = new Uint8Array(576).fill(70);
+    const brighterScene = new Uint8Array(576).fill(95);
+    const changedSubtitle = brighterScene.slice();
+    changedSubtitle.fill(210, 0, 10);
+
+    assert.equal(tracker.updateFrameSignature(baseline), true);
+    assert.equal(tracker.updateFrameSignature(brighterScene), false);
+    assert.equal(tracker.lastFrameDifference, 0);
+    assert.equal(tracker.updateFrameSignature(changedSubtitle), true);
 });
 
 test('temporal retry forces OCR even when the perceptual frame is unchanged', () => {
@@ -131,7 +145,7 @@ test('fixed area accepts similar low-confidence readings as temporal consensus',
     });
 });
 
-test('fixed area requires consecutive consensus for unrelated weak readings', () => {
+test('fixed area recovers temporal consensus after one noisy reading', () => {
     const tracker = new FixedAreaChangeTracker();
 
     assert.deepEqual(tracker.evaluateText('First uncertain subtitle', 0.5), {
@@ -143,9 +157,102 @@ test('fixed area requires consecutive consensus for unrelated weak readings', ()
         retry: true
     });
     assert.deepEqual(tracker.evaluateText('First uncertain subtitle', 0.5), {
+        display: true,
+        retry: false
+    });
+});
+
+test('fixed area does not confirm a weak candidate outside the three-frame window', () => {
+    const tracker = new FixedAreaChangeTracker();
+
+    tracker.evaluateText('First uncertain subtitle', 0.5);
+    tracker.evaluateText('Second unrelated reading', 0.5);
+    tracker.evaluateText('Third unrelated reading', 0.5);
+
+    assert.deepEqual(tracker.evaluateText('First uncertain subtitle', 0.5), {
         display: false,
         retry: true
     });
+});
+
+test('fixed area confirms an empty OCR result even when the frame stops changing', () => {
+    const tracker = new FixedAreaChangeTracker();
+    const signature = new Uint8Array([20, 40, 60, 80]);
+
+    tracker.evaluateText('Subtitle over a moving scene', 0.9);
+    tracker.updateFrameSignature(signature);
+    assert.deepEqual(tracker.evaluateBlank(), {
+        clear: false,
+        retry: true,
+        consecutiveEmptyResults: 1
+    });
+    assert.equal(tracker.lastText, 'Subtitle over a moving scene');
+    assert.equal(tracker.updateFrameSignature(signature), true);
+    assert.deepEqual(tracker.evaluateBlank(), {
+        clear: true,
+        retry: false,
+        consecutiveEmptyResults: 2
+    });
+
+    assert.equal(tracker.lastText, '');
+    assert.equal(tracker.blankFrameCount, 0);
+    assert.equal(tracker.updateFrameSignature(signature), false);
+});
+
+test('latest task queue runs one OCR and keeps only the newest pending frame', async () => {
+    let releaseFirst;
+    const firstBlocked = new Promise(resolve => {
+        releaseFirst = resolve;
+    });
+    const processed = [];
+    let active = 0;
+    let maximumActive = 0;
+    const queue = new LatestTaskQueue(async frame => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        processed.push(frame);
+        if (frame === 'frame-1') {
+            await firstBlocked;
+        }
+        active -= 1;
+    });
+
+    assert.deepEqual(queue.enqueue('frame-1'), { started: true, replaced: false });
+    for (let frame = 2; frame <= 20; frame += 1) {
+        assert.deepEqual(queue.enqueue(`frame-${frame}`), {
+            started: false,
+            replaced: frame > 2
+        });
+    }
+
+    releaseFirst();
+    await queue.whenIdle();
+
+    assert.deepEqual(processed, ['frame-1', 'frame-20']);
+    assert.equal(maximumActive, 1);
+    assert.equal(queue.running, false);
+});
+
+test('latest task queue can discard a pending frame when capture stops', async () => {
+    let releaseFirst;
+    const processed = [];
+    const queue = new LatestTaskQueue(async frame => {
+        processed.push(frame);
+        if (frame === 'active') {
+            await new Promise(resolve => {
+                releaseFirst = resolve;
+            });
+        }
+    });
+
+    queue.enqueue('active');
+    queue.enqueue('obsolete-pending');
+    assert.equal(queue.clearPending(), true);
+    releaseFirst();
+    await queue.whenIdle();
+
+    assert.deepEqual(processed, ['active']);
+    assert.equal(queue.clearPending(), false);
 });
 
 test('fixed area clears a pending candidate when the displayed text returns', () => {

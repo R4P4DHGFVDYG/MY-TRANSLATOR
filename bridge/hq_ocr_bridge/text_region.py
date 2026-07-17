@@ -6,6 +6,11 @@ from typing import Any
 from PIL import Image
 
 
+_MAX_EDGE_GRAPHIC_FRACTION = 0.42
+_MAX_SATURATED_PIXEL_FRACTION = 0.45
+_SATURATION_SPREAD_THRESHOLD = 48
+
+
 @dataclass(frozen=True)
 class _CropCandidate:
     box: tuple[int, int, int, int]
@@ -55,6 +60,12 @@ def _detect_text_region(
         return None
 
     rgb = numpy.asarray(image.convert("RGB"))
+    channel_spread = rgb.max(axis=2) - rgb.min(axis=2)
+    saturated_pixel_fraction = float(
+        (channel_spread >= _SATURATION_SPREAD_THRESHOLD).mean()
+    )
+    if saturated_pixel_fraction > _MAX_SATURATED_PIXEL_FRACTION:
+        return None
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     if float(numpy.median(gray)) > 96:
         return None
@@ -137,7 +148,7 @@ def _candidate_for_left_graphic(
     cv2: Any,
 ) -> _CropCandidate | None:
     removed_fraction = gap_end / width
-    if removed_fraction > 0.48:
+    if removed_fraction > _MAX_EDGE_GRAPHIC_FRACTION:
         return None
     if not _has_large_edge_graphic(
         foreground[:, :gap_start],
@@ -171,7 +182,7 @@ def _candidate_for_right_graphic(
     cv2: Any,
 ) -> _CropCandidate | None:
     removed_fraction = (width - gap_start) / width
-    if removed_fraction > 0.48:
+    if removed_fraction > _MAX_EDGE_GRAPHIC_FRACTION:
         return None
     if not _has_large_edge_graphic(
         foreground[:, gap_end:],

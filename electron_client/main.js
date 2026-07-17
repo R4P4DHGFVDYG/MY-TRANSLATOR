@@ -5,6 +5,7 @@ const path = require('path');
 const {
     AdaptiveCaptureCadence,
     FixedAreaChangeTracker,
+    LatestTaskQueue,
     createPerceptualSignature,
     rectanglesOverlap,
     screenSelectorConfiguration,
@@ -102,6 +103,10 @@ const fixedCaptureCadence = new AdaptiveCaptureCadence({
     idleIntervalMs: FIXED_CAPTURE_IDLE_INTERVAL_MS,
     quietFrameThreshold: FIXED_CAPTURE_QUIET_FRAME_THRESHOLD
 });
+const fixedTranslationQueue = new LatestTaskQueue(
+    job => processFixedCapturedFrame(job),
+    error => console.error('Fixed translation queue failed:', error)
+);
 
 app.setName(APP_NAME);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -318,6 +323,7 @@ function suspendFixedCaptureForOverlayEditor() {
         fixedCaptureTimer = null;
     }
     fixedCaptureGeneration += 1;
+    fixedTranslationQueue.clearPending();
     cancelActiveTranslation();
     nextTranslationId += 1;
 }
@@ -345,6 +351,7 @@ function stopFixedCapture() {
     fixedCaptureGeneration += 1;
     fixedCaptureRegion = null;
     fixedCaptureRunning = false;
+    fixedTranslationQueue.clearPending();
     fixedCaptureTracker.reset();
     fixedCaptureCadence.reset();
     fixedCaptureLastError = '';
@@ -1410,25 +1417,24 @@ async function runFixedCapture(generation) {
             return;
         }
         fixedCaptureCadence.noteChanged();
-        const captured = encodeCapturedSelection(capturedFrame, {
-            logPerformance: false
+        const bypassCache = fixedCaptureBypassCache;
+        fixedCaptureBypassCache = false;
+        const queueState = fixedTranslationQueue.enqueue({
+            capturedFrame,
+            anchorPoint,
+            display,
+            generation,
+            bypassCache,
+            queuedAt: performance.now()
         });
-
         console.info('[performance]', JSON.stringify({
             stage: 'fixed-capture-change',
             frameDifference: Number(fixedCaptureTracker.lastFrameDifference.toFixed(4)),
             captureIntervalMs: fixedCaptureCadence.currentInterval(),
-            ...captured.performance
+            startedImmediately: queueState.started,
+            pendingFrameReplaced: queueState.replaced,
+            ...capturedFrame.performance
         }));
-        const bypassCache = fixedCaptureBypassCache;
-        fixedCaptureBypassCache = false;
-        void processFixedTranslation(
-            captured,
-            anchorPoint,
-            display,
-            generation,
-            bypassCache
-        );
     } catch (error) {
         fixedCaptureCadence.noteError();
         if (generation === fixedCaptureGeneration && fixedCaptureRegion) {
@@ -1450,6 +1456,57 @@ async function runFixedCapture(generation) {
     }
 }
 
+async function processFixedCapturedFrame(job) {
+    if (
+        job.generation !== fixedCaptureGeneration
+        || !fixedCaptureRegion
+    ) {
+        return;
+    }
+
+    const queueDelayMs = performance.now() - job.queuedAt;
+    try {
+        const captured = encodeCapturedSelection(job.capturedFrame, {
+            logPerformance: false
+        });
+        job.capturedFrame = null;
+        console.info('[performance]', JSON.stringify({
+            stage: 'fixed-ocr-start',
+            queueDelayMs: Number(queueDelayMs.toFixed(2)),
+            ...captured.performance
+        }));
+        await processFixedTranslation(
+            captured,
+            job.anchorPoint,
+            job.display,
+            job.generation,
+            job.bypassCache
+        );
+    } catch (error) {
+        if (
+            job.generation !== fixedCaptureGeneration
+            || !fixedCaptureRegion
+        ) {
+            return;
+        }
+        fixedCaptureCadence.noteError();
+        fixedCaptureTracker.retryCurrentFrame();
+        fixedCaptureBypassCache = true;
+        const message = errorMessageForTranslation(error, false);
+        if (message !== fixedCaptureLastError) {
+            fixedCaptureLastError = message;
+            showToast(
+                message,
+                job.anchorPoint.x,
+                job.anchorPoint.y,
+                settings,
+                job.display
+            );
+        }
+        scheduleFixedCapture(job.generation, FIXED_CAPTURE_ACTIVE_INTERVAL_MS);
+    }
+}
+
 async function processFixedTranslation(
     captured,
     anchorPoint,
@@ -1457,6 +1514,9 @@ async function processFixedTranslation(
     generation,
     bypassCache
 ) {
+    if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
+        return;
+    }
     const translationId = ++nextTranslationId;
     let immediateRetry = false;
     try {
@@ -1481,8 +1541,22 @@ async function processFixedTranslation(
                     }
                     const sourceText = result.sourceText.trim();
                     if (!sourceText) {
-                        fixedCaptureTracker.updateText('');
-                        closeToastWindow();
+                        const blankDecision = fixedCaptureTracker.evaluateBlank();
+                        if (blankDecision.retry) {
+                            fixedCaptureBypassCache = true;
+                            immediateRetry = true;
+                        }
+                        console.info('[performance]', JSON.stringify({
+                            stage: 'ocr-empty-result',
+                            requestId: translationId,
+                            consecutiveEmptyResults: blankDecision.consecutiveEmptyResults,
+                            confirmationScheduled: blankDecision.retry,
+                            overlayCleared: blankDecision.clear
+                        }));
+                        if (blankDecision.clear) {
+                            fixedCaptureBypassCache = false;
+                            closeToastWindow();
+                        }
                         return false;
                     }
                     const decision = fixedCaptureTracker.evaluateText(
@@ -1614,6 +1688,7 @@ function updateSettings(newSettings) {
         || previousOcrContext.ocrEngine !== settings.ocrEngine;
     if (ocrContextChanged) {
         resultCache.clear();
+        fixedTranslationQueue.clearPending();
         cancelActiveTranslation();
         nextTranslationId += 1;
         fixedCaptureTracker.reset();

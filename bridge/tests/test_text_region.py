@@ -71,6 +71,34 @@ def test_keeps_large_inset_logo_and_following_text_unchanged():
     assert isolated is image
 
 
+def test_keeps_wide_scene_when_an_edge_element_would_remove_almost_half():
+    image = Image.new("RGB", (1000, 220), "black")
+    draw = ImageDraw.Draw(image)
+    for line in range(3):
+        y = 30 + line * 55
+        for character in range(15):
+            x = 60 + character * 32
+            draw.rectangle((x, y, x + 16, y + 32), fill="white")
+    draw.rectangle((650, 10, 990, 210), outline="white", width=12)
+    draw.ellipse((720, 35, 920, 195), outline="white", width=10)
+
+    isolated = isolate_text_region(image)
+
+    assert isolated is image
+
+
+def test_keeps_colorful_scene_with_a_character_at_the_edge_unchanged():
+    image = Image.new("RGB", (600, 180), (30, 15, 100))
+    draw = ImageDraw.Draw(image)
+    _draw_text_components(draw, 60, 28)
+    draw.rectangle((470, 15, 580, 165), outline="white", width=8)
+    draw.ellipse((495, 45, 555, 105), outline="white", width=6)
+
+    isolated = isolate_text_region(image)
+
+    assert isolated is image
+
+
 def test_keeps_original_when_opencv_is_unavailable(monkeypatch):
     image = _dialogue_box("left")
     monkeypatch.setattr(text_region, "_load_opencv", lambda: None)
