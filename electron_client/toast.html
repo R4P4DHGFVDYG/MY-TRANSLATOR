@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>G.R.C TRANSLATOR</title>
     <link rel="icon" href="assets/spider-intro.png" type="image/png">
@@ -43,28 +43,29 @@
             flex-direction: column;
             justify-content: center;
             overflow: hidden;
-            padding: clamp(8px, 10vh, 20px) clamp(36px, 8vw, 48px) clamp(8px, 11vh, 22px) clamp(8px, 4vw, 24px);
-            border: 1px solid rgba(196, 173, 239, 0.28);
+            padding: clamp(6px, 8vh, 18px) clamp(32px, 7vw, 46px) clamp(6px, 9vh, 20px) clamp(8px, 4vw, 24px);
+            border: 0;
             border-radius: 0;
             color: var(--text);
             background: rgba(22, 13, 38, 0.94);
-            backdrop-filter: blur(22px);
-            -webkit-backdrop-filter: blur(22px);
             cursor: grab;
             -webkit-app-region: drag;
             animation: toastIn 220ms cubic-bezier(.2, .8, .2, 1);
         }
 
-        .toast-shell::before {
-            content: "";
-            position: absolute;
-            inset: 0 auto 0 0;
-            width: 3px;
-            background: var(--panel-highlight, #b49aff);
-        }
-
         .toast-shell:active {
             cursor: grabbing;
+        }
+
+        .toast-shell.configured-overlay {
+            padding: clamp(6px, 3vmin, 16px);
+            cursor: default;
+            -webkit-app-region: no-drag;
+        }
+
+        .toast-shell.configured-overlay .close-button,
+        .toast-shell.configured-overlay .toast-header {
+            display: none;
         }
 
         .toast-header {
@@ -97,9 +98,14 @@
         .content-row {
             position: relative;
             z-index: 1;
+            width: 100%;
+            min-width: 0;
+            min-height: 0;
+            flex: 1;
             display: flex;
             align-items: center;
             gap: 12px;
+            overflow: hidden;
         }
 
         .spinner {
@@ -119,13 +125,18 @@
 
         #content {
             flex: 1;
+            width: 100%;
+            min-width: 0;
             max-width: 100%;
+            max-height: 100%;
             color: inherit;
             font-size: 18px;
             font-weight: 560;
             line-height: 1.45;
             letter-spacing: -0.012em;
+            overflow: hidden;
             overflow-wrap: anywhere;
+            word-break: break-word;
             white-space: pre-wrap;
         }
 
@@ -164,6 +175,28 @@
             height: 13px;
         }
 
+        @media (max-height: 118px) {
+            .toast-shell {
+                padding-top: 7px;
+                padding-bottom: 7px;
+            }
+
+            .toast-header {
+                display: none;
+            }
+        }
+
+        @media (max-width: 260px) {
+            .toast-shell {
+                padding-left: 8px;
+                padding-right: 32px;
+            }
+
+            .toast-shell.configured-overlay {
+                padding-right: 8px;
+            }
+        }
+
         @keyframes toastIn {
             from { opacity: 0; transform: translateY(10px) scale(0.975); }
             to { opacity: 1; transform: translateY(0) scale(1); }
@@ -186,14 +219,43 @@
         </div>
         <div class="content-row">
             <span class="spinner" aria-hidden="true"></span>
-            <div id="content" role="status" aria-live="polite">Carregando...</div>
+            <div id="content" role="status" aria-live="polite" aria-atomic="true">Carregando...</div>
         </div>
     </div>
 
+    <script src="text_fit.js"></script>
     <script>
         const desktopApi = window.ocrDesktop;
         const toastBox = document.getElementById('toastBox');
         const content = document.getElementById('content');
+        const contentRow = document.querySelector('.content-row');
+        let preferredFontSize = 18;
+        let loadingState = false;
+
+        function fitTextToOverlay() {
+            const maximum = loadingState ? Math.min(15, preferredFontSize) : preferredFontSize;
+            const minimum = Math.min(maximum, 6);
+            const fittingSize = window.ocrTextFit.largestFittingFontSize(
+                maximum,
+                minimum,
+                candidate => {
+                    content.style.fontSize = `${candidate}px`;
+                    return content.scrollHeight <= content.clientHeight + 1
+                        && content.scrollWidth <= content.clientWidth + 1;
+                }
+            );
+            content.style.fontSize = `${fittingSize}px`;
+        }
+
+        const textFitScheduler = window.ocrTextFit.createLatestFrameScheduler(
+            requestAnimationFrame,
+            cancelAnimationFrame,
+            fitTextToOverlay
+        );
+
+        function scheduleTextFit() {
+            textFitScheduler.schedule();
+        }
 
         function hexToRgba(hex, alpha) {
             if (typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) {
@@ -205,13 +267,14 @@
             return `rgba(${r}, ${g}, ${b}, ${alpha})`;
         }
 
-        desktopApi.toast.onSetText(data => {
+        const unsubscribeText = desktopApi.toast.onSetText(data => {
             const text = typeof data?.text === 'string' ? data.text : '';
             const style = data?.style || {};
             const loading = text.trim().toLowerCase().startsWith('traduzindo');
 
-            content.innerText = text;
-            const fontSize = Math.min(36, Math.max(12, Number(style.fontSize) || 18));
+            content.textContent = text;
+            preferredFontSize = Math.min(36, Math.max(12, Number(style.fontSize) || 18));
+            loadingState = loading;
             const fontFamily = typeof style.fontFamily === 'string' && style.fontFamily
                 ? style.fontFamily.replace(/[;{}"\\]/g, '')
                 : 'Segoe UI';
@@ -219,24 +282,39 @@
                 ? style.textAlign
                 : 'left';
             toastBox.classList.toggle('loading', loading);
+            toastBox.classList.toggle('configured-overlay', Boolean(style.overlayAreaConfigured));
             toastBox.style.color = style.textColor || '#ffffff';
-            content.style.fontSize = `${loading ? 15 : fontSize}px`;
             content.style.fontFamily = `"${fontFamily}", "Segoe UI", sans-serif`;
             content.style.textAlign = textAlign;
             toastBox.style.setProperty('--panel-color', style.bgColor || '#160d26');
-            toastBox.style.setProperty(
-                '--panel-highlight',
-                `color-mix(in srgb, ${style.bgColor || '#160d26'} 35%, white)`
-            );
             toastBox.style.background = hexToRgba(
                 style.bgColor || '#160d26',
                 style.opacity !== undefined ? style.opacity : 0.94
             );
+            scheduleTextFit();
         });
+
+        document.fonts?.ready.then(scheduleTextFit).catch(() => {});
+
+        const resizeObserver = typeof ResizeObserver === 'function'
+            ? new ResizeObserver(scheduleTextFit)
+            : null;
+        if (resizeObserver) {
+            resizeObserver.observe(toastBox);
+            resizeObserver.observe(contentRow);
+        } else {
+            window.addEventListener('resize', scheduleTextFit);
+        }
 
         document.getElementById('closeButton').addEventListener('click', event => {
             event.stopPropagation();
             desktopApi.toast.close();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            unsubscribeText();
+            resizeObserver?.disconnect();
+            textFitScheduler.cancel();
         });
     </script>
 </body>

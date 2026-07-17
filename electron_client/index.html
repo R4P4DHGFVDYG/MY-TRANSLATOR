@@ -266,6 +266,60 @@
             background: rgba(74, 226, 168, 0.13);
         }
 
+        .capture-button:disabled {
+            cursor: wait;
+            opacity: 0.7;
+        }
+
+        .capture-button.secondary {
+            border: 1px solid rgba(180, 154, 255, 0.42);
+            color: #e9e0ff;
+            background: rgba(180, 154, 255, 0.09);
+        }
+
+        .capture-button.secondary:hover {
+            color: #160b26;
+            background: #c7b4ff;
+        }
+
+        .capture-button.secondary.editing {
+            color: #ffffff;
+            background: rgba(180, 154, 255, 0.2);
+        }
+
+        .overlay-area-meta {
+            max-width: 240px;
+            color: var(--muted);
+            font-size: 10px;
+            line-height: 1.35;
+        }
+
+        .overlay-area-reset {
+            width: fit-content;
+            padding: 0;
+            border: 0;
+            color: #cbbcff;
+            background: transparent;
+            cursor: pointer;
+            font: inherit;
+            font-size: 10px;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+
+        .overlay-area-reset:hover {
+            color: #ffffff;
+        }
+
+        .overlay-area-reset[hidden] {
+            display: none;
+        }
+
+        select:disabled {
+            cursor: not-allowed;
+            opacity: 0.52;
+        }
+
         .capture-button:hover {
             background: #c7b4ff;
         }
@@ -587,6 +641,19 @@
                         </svg>
                         <span id="fixedAreaButtonLabel">Definir área automática</span>
                     </button>
+                    <button class="capture-button secondary" id="overlayAreaButton" type="button" aria-describedby="overlayAreaStatus">
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <rect x="4" y="4" width="12" height="12" stroke="currentColor" stroke-width="1.5"/>
+                            <path d="M2.5 7V2.5H7M13 2.5h4.5V7M17.5 13v4.5H13M7 17.5H2.5V13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                        </svg>
+                        <span id="overlayAreaButtonLabel">Definir área da tradução</span>
+                    </button>
+                    <div class="overlay-area-meta" id="overlayAreaStatus" role="status" aria-live="polite">
+                        Usando a área de captura como padrão.
+                    </div>
+                    <button class="overlay-area-reset" id="overlayAreaResetButton" type="button" hidden>
+                        Voltar a usar a área de captura
+                    </button>
                 </div>
             </section>
 
@@ -609,7 +676,6 @@
                         <label for="ocrEngine">OCR utilizado</label>
                         <select id="ocrEngine">
                             <option value="auto" selected>Automático — recomendado</option>
-                            <option value="auto8bit">Automático — 8 bits</option>
                             <option value="windowsocr">Windows OCR — Nativo e rápido</option>
                             <option value="tesseract">Tesseract — Windows</option>
                             <option value="paddleocr">PaddleOCR — Inteligência artificial</option>
@@ -798,7 +864,7 @@
                 defaultShortcut: { type: 'keyboard', value: 'Ctrl+Shift+E' }
             }
         };
-        const allowedOcrEngines = new Set(['auto', 'auto8bit', 'windowsocr', 'tesseract', 'paddleocr', 'easyocr']);
+        const allowedOcrEngines = new Set(['auto', 'windowsocr', 'tesseract', 'paddleocr', 'easyocr']);
         const settingIds = [
             'source', 'target', 'ocrEngine', 'position', 'fontFamily', 'fontSize',
             'textAlign', 'textColor', 'bgColor', 'opacity'
@@ -1002,7 +1068,6 @@
         function updateOcrHint(engine) {
             const hints = {
                 auto: 'Compara Tesseract e Windows OCR em paralelo e consulta PaddleOCR quando a leitura estiver incerta.',
-                auto8bit: 'Força o tratamento para fontes pixeladas, compara Tesseract e Windows OCR e usa PaddleOCR quando houver dúvida.',
                 windowsocr: 'Windows OCR é nativo, rápido e usa o pacote de idioma instalado no sistema.',
                 tesseract: 'Tesseract é uma opção local leve e rápida para fontes comuns.',
                 paddleocr: 'PaddleOCR pode reconhecer fontes difíceis, mas o primeiro uso demora mais.',
@@ -1023,6 +1088,42 @@
                 : active
                     ? 'Parar tradução automática'
                     : 'Definir área automática';
+        }
+
+        function updateOverlayAreaState(state) {
+            const button = document.getElementById('overlayAreaButton');
+            const label = document.getElementById('overlayAreaButtonLabel');
+            const status = document.getElementById('overlayAreaStatus');
+            const resetButton = document.getElementById('overlayAreaResetButton');
+            const position = document.getElementById('position');
+            const configured = Boolean(state?.configured);
+            const editing = Boolean(state?.editing);
+            const width = Math.round(Number(state?.bounds?.width) || 0);
+            const height = Math.round(Number(state?.bounds?.height) || 0);
+            const displayLabel = typeof state?.displayLabel === 'string' ? state.displayLabel : '';
+
+            button.classList.toggle('editing', editing);
+            button.disabled = editing;
+            label.textContent = editing
+                ? 'Ajustando área...'
+                : configured
+                    ? 'Alterar área da tradução'
+                    : 'Definir área da tradução';
+            status.textContent = editing
+                ? 'Arraste a área pela tela e redimensione pelas bordas.'
+                : configured
+                    ? `${width} × ${height}px${displayLabel ? ` · ${displayLabel}` : ''}`
+                    : 'Usando a área de captura como padrão.';
+            resetButton.hidden = !configured || editing;
+            position.disabled = configured;
+            position.title = configured
+                ? 'A posição é controlada pela área da tradução configurada.'
+                : '';
+            if (configured) {
+                position.setAttribute('aria-describedby', 'overlayAreaStatus');
+            } else {
+                position.removeAttribute('aria-describedby');
+            }
         }
 
         function updateVisualValues() {
@@ -1098,6 +1199,8 @@
         document.getElementById('minimizeButton').addEventListener('click', () => desktopApi.settings.minimize());
         document.getElementById('closeButton').addEventListener('click', () => desktopApi.settings.close());
         document.getElementById('fixedAreaButton').addEventListener('click', () => desktopApi.settings.toggleFixedArea());
+        document.getElementById('overlayAreaButton').addEventListener('click', () => desktopApi.settings.editOverlayArea());
+        document.getElementById('overlayAreaResetButton').addEventListener('click', () => desktopApi.settings.resetOverlayArea());
         for (const action of Object.keys(shortcutConfigs)) {
             document.getElementById(`${action}ShortcutRecorder`).addEventListener('click', () => setShortcutRecording(action));
         }
@@ -1170,10 +1273,19 @@
         refreshBridgeStatus();
         desktopApi.settings.getFixedAreaState().then(updateFixedAreaState).catch(() => {});
         const unsubscribeFixedArea = desktopApi.settings.onFixedAreaState(updateFixedAreaState);
+        desktopApi.settings.getOverlayAreaState().then(updateOverlayAreaState).catch(() => {});
+        const unsubscribeOverlayArea = desktopApi.settings.onOverlayAreaState(updateOverlayAreaState);
+        const unsubscribeOverlayAreaError = desktopApi.settings.onOverlayAreaError(message => {
+            document.getElementById('overlayAreaStatus').textContent = typeof message === 'string'
+                ? message
+                : 'Não foi possível alterar a área da tradução.';
+        });
         const statusTimer = setInterval(refreshBridgeStatus, 5000);
         window.addEventListener('beforeunload', () => {
             clearInterval(statusTimer);
             unsubscribeFixedArea();
+            unsubscribeOverlayArea();
+            unsubscribeOverlayAreaError();
         });
     </script>
 </body>

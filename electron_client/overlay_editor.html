@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Área da sobreposição</title>
+    <link rel="icon" href="assets/spider-intro.png" type="image/png">
+    <style>
+        :root {
+            color-scheme: dark;
+            --purple: #b49aff;
+            --surface: rgba(18, 9, 31, 0.9);
+            --text: #f7f2ff;
+            --muted: #b8abc8;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background: transparent;
+            font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+            user-select: none;
+        }
+
+        .editor-shell {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            min-width: 0;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 8px;
+            overflow: hidden;
+            padding: 12px;
+            border: 2px solid var(--purple);
+            background: var(--surface);
+            cursor: move;
+            -webkit-app-region: drag;
+        }
+
+        .editor-shell::after {
+            content: "";
+            position: absolute;
+            inset: 5px;
+            border: 1px dashed rgba(255, 255, 255, 0.25);
+            pointer-events: none;
+        }
+
+        .editor-copy,
+        .editor-actions {
+            position: relative;
+            z-index: 1;
+        }
+
+        .editor-copy {
+            min-width: 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 9px;
+        }
+
+        .editor-copy img {
+            width: 20px;
+            height: 24px;
+            flex: 0 0 auto;
+            object-fit: contain;
+        }
+
+        .editor-title {
+            margin: 0;
+            color: var(--text);
+            font-size: 12px;
+            font-weight: 750;
+            line-height: 1.25;
+        }
+
+        .editor-help {
+            margin-top: 3px;
+            color: var(--muted);
+            font-size: 9px;
+            line-height: 1.35;
+        }
+
+        .editor-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 7px;
+            -webkit-app-region: no-drag;
+        }
+
+        .dimension {
+            min-width: 62px;
+            color: var(--purple);
+            font-family: "Cascadia Mono", Consolas, monospace;
+            font-size: 9px;
+            white-space: nowrap;
+        }
+
+        .dimension.error {
+            color: #ffb4c2;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 6px;
+        }
+
+        button {
+            min-height: 27px;
+            padding: 0 9px;
+            border: 1px solid rgba(180, 154, 255, 0.4);
+            border-radius: 0;
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.06);
+            cursor: pointer;
+            font: inherit;
+            font-size: 9px;
+            font-weight: 700;
+        }
+
+        button:hover,
+        button:focus-visible {
+            outline: none;
+            border-color: var(--purple);
+            background: rgba(180, 154, 255, 0.17);
+        }
+
+        .save-button {
+            border-color: transparent;
+            color: #160b26;
+            background: var(--purple);
+        }
+
+        .save-button:hover,
+        .save-button:focus-visible {
+            color: #160b26;
+            background: #c7b4ff;
+        }
+
+        .reset-button {
+            color: var(--muted);
+        }
+
+        @media (max-width: 360px), (max-height: 150px) {
+            .editor-shell {
+                padding: 9px;
+            }
+
+            .editor-help,
+            .reset-button {
+                display: none;
+            }
+        }
+
+        @media (max-width: 260px) {
+            .editor-actions {
+                justify-content: flex-end;
+            }
+
+            .dimension,
+            .reset-button {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="editor-shell" aria-label="Editor da área de sobreposição">
+        <div class="editor-copy">
+            <img src="assets/spider-intro.png" alt="">
+            <div>
+                <h1 class="editor-title">Posicione a área da tradução</h1>
+                <div class="editor-help">Arraste para mover e use as bordas ou os cantos para redimensionar.</div>
+            </div>
+        </div>
+        <div class="editor-actions">
+            <span class="dimension" id="dimension">—</span>
+            <div class="button-group">
+                <button class="reset-button" id="resetButton" type="button">Usar captura</button>
+                <button id="cancelButton" type="button">Cancelar</button>
+                <button class="save-button" id="saveButton" type="button">Salvar</button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const desktopApi = window.ocrDesktop;
+        const dimension = document.getElementById('dimension');
+        const actionButtons = [...document.querySelectorAll('button')];
+        let actionTaken = false;
+
+        function runAction(action) {
+            if (actionTaken) {
+                return;
+            }
+            actionTaken = true;
+            actionButtons.forEach(button => {
+                button.disabled = true;
+            });
+            action();
+        }
+
+        function updateBounds(bounds) {
+            const width = Math.max(1, Math.round(Number(bounds?.width) || window.outerWidth));
+            const height = Math.max(1, Math.round(Number(bounds?.height) || window.outerHeight));
+            dimension.classList.remove('error');
+            dimension.textContent = `${width} × ${height}`;
+        }
+
+        const unsubscribeBounds = desktopApi.overlayEditor.onBounds(updateBounds);
+        const unsubscribeError = desktopApi.overlayEditor.onError(message => {
+            actionTaken = false;
+            actionButtons.forEach(button => {
+                button.disabled = false;
+            });
+            dimension.classList.add('error');
+            dimension.textContent = typeof message === 'string' ? message : 'Não foi possível salvar.';
+        });
+        updateBounds({ width: window.outerWidth, height: window.outerHeight });
+
+        document.getElementById('saveButton').addEventListener('click', () => runAction(desktopApi.overlayEditor.save));
+        document.getElementById('cancelButton').addEventListener('click', () => runAction(desktopApi.overlayEditor.cancel));
+        document.getElementById('resetButton').addEventListener('click', () => runAction(desktopApi.overlayEditor.reset));
+
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                runAction(desktopApi.overlayEditor.cancel);
+            } else if (event.key === 'Enter' && !event.target.closest('button')) {
+                event.preventDefault();
+                event.stopPropagation();
+                runAction(desktopApi.overlayEditor.save);
+            }
+        });
+
+        window.addEventListener('resize', () => updateBounds({
+            width: window.outerWidth,
+            height: window.outerHeight
+        }));
+        window.addEventListener('beforeunload', () => {
+            unsubscribeBounds();
+            unsubscribeError();
+        });
+    </script>
+</body>
+</html>

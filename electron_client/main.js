@@ -12,6 +12,16 @@ const {
 } = require('./fixed_area');
 const { normalizeCaptureShortcut, hasShortcutConflict } = require('./shortcut');
 const { normalizeFontFamily, normalizeFontSize, normalizeTextAlign } = require('./appearance');
+const {
+    MIN_OVERLAY_HEIGHT,
+    MIN_OVERLAY_WIDTH,
+    initialOverlayEditorLayout,
+    normalizeOverlayRegion,
+    regionFromWindowBounds,
+    resolveOverlayRegion,
+    serializeOverlayRegion
+} = require('./overlay_area');
+const { readOverlayRegion, writeOverlayRegion } = require('./overlay_store');
 const { LANGUAGE_CODES, languageOptions } = require('./language_catalog');
 const {
     OCR_ENGINES,
@@ -40,6 +50,7 @@ const PERCEPTUAL_SAMPLE_HEIGHT = 18;
 const INTRO_FALLBACK_MS = 5000;
 const RESULT_CACHE_CAPACITY = 64;
 const RESULT_CACHE_TTL_MS = 10 * 60 * 1000;
+const OVERLAY_AREA_FILE_NAME = 'overlay-area.json';
 const CLIENT_ID = randomUUID();
 const SOURCE_LANGUAGES = LANGUAGE_CODES;
 const TARGET_LANGUAGES = LANGUAGE_CODES;
@@ -60,6 +71,10 @@ let shouldShowSettings = false;
 let shouldFocusSettings = false;
 let snipWindow = null;
 let snipDisplay = null;
+let overlayEditorWindow = null;
+let isStartingOverlayEditor = false;
+let overlayEditorSuspendedCapture = false;
+let overlayRegion = null;
 let toastWindow = null;
 let toastCloseTimer = null;
 let toastReady = false;
@@ -78,6 +93,8 @@ let fixedCaptureRunning = false;
 let fixedCaptureLastError = '';
 let fixedCaptureBypassCache = false;
 let systemFontsCache = null;
+let isQuitting = false;
+let displayRefreshTimer = null;
 const resultCache = new Map();
 const fixedCaptureTracker = new FixedAreaChangeTracker();
 const fixedCaptureCadence = new AdaptiveCaptureCadence({
@@ -201,6 +218,124 @@ function publishFixedAreaState() {
     sendToWindow(settingsWindow, 'fixed-area-state', getFixedAreaState());
 }
 
+function overlayAreaFilePath() {
+    return path.join(app.getPath('userData'), OVERLAY_AREA_FILE_NAME);
+}
+
+function loadOverlayArea() {
+    try {
+        const storedRegion = readOverlayRegion(overlayAreaFilePath());
+        if (!storedRegion) {
+            console.warn('[overlay] Ignoring invalid saved overlay area.');
+            return;
+        }
+        const resolved = resolveOverlayRegion(storedRegion, screen.getAllDisplays());
+        overlayRegion = resolved ? resolved.region : storedRegion;
+        if (resolved && serializeOverlayRegion(resolved.region) !== serializeOverlayRegion(storedRegion)) {
+            persistOverlayArea();
+        }
+    } catch (error) {
+        if (error?.code !== 'ENOENT') {
+            console.warn('[overlay] Could not load the saved overlay area:', error);
+        }
+    }
+}
+
+function persistOverlayArea() {
+    try {
+        writeOverlayRegion(overlayAreaFilePath(), overlayRegion);
+        return true;
+    } catch (error) {
+        console.warn('[overlay] Could not save the overlay area:', error);
+        return false;
+    }
+}
+
+function resolvedOverlayArea() {
+    return resolveOverlayRegion(overlayRegion, screen.getAllDisplays());
+}
+
+function getOverlayAreaState() {
+    const resolved = resolvedOverlayArea();
+    const displays = screen.getAllDisplays();
+    const displayIndex = resolved
+        ? displays.findIndex(display => Number(display.id) === Number(resolved.display.id))
+        : -1;
+    return {
+        configured: Boolean(resolved),
+        editing: isStartingOverlayEditor || isWindowAlive(overlayEditorWindow),
+        bounds: resolved ? { ...resolved.bounds } : null,
+        displayId: resolved ? resolved.display.id : null,
+        displayLabel: resolved
+            ? (resolved.display.label || `Monitor ${displayIndex + 1}`)
+            : ''
+    };
+}
+
+function publishOverlayAreaState() {
+    sendToWindow(settingsWindow, 'overlay-area-state', getOverlayAreaState());
+}
+
+function setOverlayArea(region) {
+    const normalized = normalizeOverlayRegion(region);
+    if (!normalized) {
+        return false;
+    }
+    const resolved = resolveOverlayRegion(normalized, screen.getAllDisplays());
+    if (!resolved) {
+        return false;
+    }
+    const previousRegion = overlayRegion;
+    overlayRegion = resolved.region;
+    if (!persistOverlayArea()) {
+        overlayRegion = previousRegion;
+        publishOverlayAreaState();
+        return false;
+    }
+    publishOverlayAreaState();
+    return true;
+}
+
+function clearOverlayArea() {
+    const previousRegion = overlayRegion;
+    overlayRegion = null;
+    if (!persistOverlayArea()) {
+        overlayRegion = previousRegion;
+        publishOverlayAreaState();
+        return false;
+    }
+    publishOverlayAreaState();
+    return true;
+}
+
+function suspendFixedCaptureForOverlayEditor() {
+    overlayEditorSuspendedCapture = Boolean(fixedCaptureRegion);
+    if (!overlayEditorSuspendedCapture) {
+        return;
+    }
+    if (fixedCaptureTimer) {
+        clearTimeout(fixedCaptureTimer);
+        fixedCaptureTimer = null;
+    }
+    fixedCaptureGeneration += 1;
+    cancelActiveTranslation();
+    nextTranslationId += 1;
+}
+
+function resumeFixedCaptureAfterOverlayEditor() {
+    const shouldResume = overlayEditorSuspendedCapture && Boolean(fixedCaptureRegion);
+    overlayEditorSuspendedCapture = false;
+    if (!shouldResume) {
+        return;
+    }
+    fixedCaptureGeneration += 1;
+    fixedCaptureTracker.reset();
+    fixedCaptureCadence.reset();
+    fixedCaptureLastError = '';
+    fixedCaptureBypassCache = false;
+    scheduleFixedCapture(fixedCaptureGeneration, 0);
+}
+
 function stopFixedCapture() {
     const hadFixedCapture = Boolean(fixedCaptureRegion) || fixedCaptureTimer !== null;
     if (fixedCaptureTimer) {
@@ -214,6 +349,7 @@ function stopFixedCapture() {
     fixedCaptureCadence.reset();
     fixedCaptureLastError = '';
     fixedCaptureBypassCache = false;
+    overlayEditorSuspendedCapture = false;
     if (hadFixedCapture) {
         cancelActiveTranslation();
         nextTranslationId += 1;
@@ -229,6 +365,13 @@ function stopAreaCapture() {
         snipDisplay = null;
         closeWindow(currentSnip);
     }
+    if (isWindowAlive(overlayEditorWindow)) {
+        finishOverlayEditor(overlayEditorWindow, {
+            resumeCapture: false,
+            showSettings: false
+        });
+    }
+    isStartingOverlayEditor = false;
     stopFixedCapture();
     cancelActiveTranslation();
     nextTranslationId += 1;
@@ -490,6 +633,128 @@ function showSettingsWindow(focus = true) {
     }
 }
 
+function sendOverlayEditorBounds(window) {
+    if (isWindowAlive(window)) {
+        sendToWindow(window, 'overlay-editor-bounds', window.getBounds());
+    }
+}
+
+function finishOverlayEditor(currentEditor, options = {}) {
+    if (overlayEditorWindow !== currentEditor) {
+        return;
+    }
+    overlayEditorWindow = null;
+    if (isWindowAlive(currentEditor)) {
+        currentEditor.destroy();
+    }
+    if (options.resumeCapture !== false) {
+        resumeFixedCaptureAfterOverlayEditor();
+    } else {
+        overlayEditorSuspendedCapture = false;
+    }
+    publishOverlayAreaState();
+    if (!isQuitting && options.showSettings !== false) {
+        showSettingsWindow(true);
+    }
+}
+
+async function startOverlayEditor() {
+    if (isStartingSnip || isWindowAlive(snipWindow)) {
+        return;
+    }
+    if (isWindowAlive(overlayEditorWindow)) {
+        overlayEditorWindow.show();
+        overlayEditorWindow.focus();
+        return;
+    }
+    if (isStartingOverlayEditor) {
+        return;
+    }
+
+    isStartingOverlayEditor = true;
+    publishOverlayAreaState();
+    suspendFixedCaptureForOverlayEditor();
+    closeToastWindow();
+    if (isWindowAlive(settingsWindow)) {
+        settingsWindow.minimize();
+    }
+
+    let currentEditor = null;
+    try {
+        const displays = screen.getAllDisplays();
+        const preferredDisplay = isWindowAlive(settingsWindow)
+            ? screen.getDisplayMatching(settingsWindow.getBounds())
+            : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+        const layout = initialOverlayEditorLayout({
+            overlayRegion,
+            captureRegion: fixedCaptureRegion,
+            displays,
+            preferredDisplay,
+            defaultSize: { width: TOAST_WIDTH, height: TOAST_HEIGHT }
+        });
+        if (!layout) {
+            throw new Error('No display is available for the overlay editor.');
+        }
+
+        currentEditor = new BrowserWindow({
+            ...layout.bounds,
+            title: 'Área da sobreposição',
+            icon: APP_ICON_PATH,
+            minWidth: MIN_OVERLAY_WIDTH,
+            minHeight: MIN_OVERLAY_HEIGHT,
+            frame: false,
+            transparent: true,
+            resizable: true,
+            movable: true,
+            thickFrame: true,
+            roundedCorners: false,
+            alwaysOnTop: true,
+            skipTaskbar: true,
+            fullscreenable: false,
+            maximizable: false,
+            minimizable: false,
+            backgroundColor: '#00000000',
+            show: false,
+            webPreferences: getWebPreferences()
+        });
+        hardenWindow(currentEditor);
+        configureFullscreenOverlay(currentEditor);
+        overlayEditorWindow = currentEditor;
+
+        currentEditor.on('closed', () => {
+            finishOverlayEditor(currentEditor);
+        });
+        currentEditor.on('move', () => sendOverlayEditorBounds(currentEditor));
+        currentEditor.on('resize', () => sendOverlayEditorBounds(currentEditor));
+        currentEditor.webContents.on('did-finish-load', () => {
+            sendOverlayEditorBounds(currentEditor);
+        });
+        currentEditor.once('ready-to-show', () => {
+            if (overlayEditorWindow === currentEditor) {
+                showOverlay(currentEditor);
+                currentEditor.focus();
+            }
+        });
+        await currentEditor.loadFile(path.join(__dirname, 'overlay_editor.html'));
+    } catch (error) {
+        if (currentEditor && overlayEditorWindow !== currentEditor) {
+            return;
+        }
+        console.error('Failed to open overlay editor:', error);
+        if (currentEditor && overlayEditorWindow === currentEditor) {
+            finishOverlayEditor(currentEditor);
+        } else {
+            resumeFixedCaptureAfterOverlayEditor();
+            if (!isQuitting) {
+                showSettingsWindow(true);
+            }
+        }
+    } finally {
+        isStartingOverlayEditor = false;
+        publishOverlayAreaState();
+    }
+}
+
 function finishIntro() {
     if (introFallbackTimer) {
         clearTimeout(introFallbackTimer);
@@ -620,15 +885,29 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
         x: Number.isFinite(x) ? x : 0,
         y: Number.isFinite(y) ? y : 0
     };
-    let display = preferredDisplay || screen.getDisplayNearestPoint(anchorPoint);
-    let workArea = display.workArea;
-    const toastSize = toastSizeForFixedArea(
-        fixedCaptureRegion,
-        display,
-        workArea,
-        { width: TOAST_WIDTH, height: TOAST_HEIGHT }
-    );
-    pendingToastPayload = { text, style: { ...settings } };
+    const configuredOverlay = resolvedOverlayArea();
+    let display = configuredOverlay?.display
+        || preferredDisplay
+        || screen.getDisplayNearestPoint(anchorPoint);
+    let workArea = configuredOverlay ? display.bounds : display.workArea;
+    const toastSize = configuredOverlay
+        ? {
+            width: configuredOverlay.bounds.width,
+            height: configuredOverlay.bounds.height
+        }
+        : toastSizeForFixedArea(
+            fixedCaptureRegion,
+            display,
+            workArea,
+            { width: TOAST_WIDTH, height: TOAST_HEIGHT }
+        );
+    pendingToastPayload = {
+        text,
+        style: {
+            ...settings,
+            overlayAreaConfigured: Boolean(configuredOverlay)
+        }
+    };
 
     let currentToast = toastWindow;
     const wasAlreadyOpen = isWindowAlive(currentToast);
@@ -640,11 +919,14 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             transparent: true,
             alwaysOnTop: true,
             skipTaskbar: true,
-            focusable: true,
+            focusable: !configuredOverlay,
+            hasShadow: false,
             show: false,
             webPreferences: getWebPreferences()
         });
         hardenWindow(currentToast);
+        currentToast.setContentProtection(true);
+        currentToast.setIgnoreMouseEvents(Boolean(configuredOverlay), { forward: true });
         toastWindow = currentToast;
         toastReady = false;
 
@@ -656,7 +938,7 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             }
         });
         currentToast.on('moved', () => {
-            if (!isWindowAlive(currentToast) || isPositioningToast) {
+            if (!isWindowAlive(currentToast) || isPositioningToast || resolvedOverlayArea()) {
                 return;
             }
 
@@ -684,8 +966,12 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             }
         });
     } else {
+        currentToast.setIgnoreMouseEvents(Boolean(configuredOverlay), { forward: true });
         const [currentWidth, currentHeight] = currentToast.getSize();
-        if (currentWidth !== toastSize.width || currentHeight !== toastSize.height) {
+        if (
+            !configuredOverlay
+            && (currentWidth !== toastSize.width || currentHeight !== toastSize.height)
+        ) {
             currentToast.setSize(toastSize.width, toastSize.height, false);
         }
         if (toastReady) {
@@ -698,7 +984,10 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
     let posY = workArea.y + TOAST_MARGIN;
 
     const livePosition = settings.position;
-    if (livePosition === 'custom') {
+    if (configuredOverlay) {
+        posX = configuredOverlay.bounds.x;
+        posY = configuredOverlay.bounds.y;
+    } else if (livePosition === 'custom') {
         if (wasAlreadyOpen) {
             [posX, posY] = currentToast.getPosition();
             display = screen.getDisplayNearestPoint({ x: posX, y: posY });
@@ -720,17 +1009,28 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
         posY = anchorPoint.y + 10;
     }
 
-    const clampedPosition = clampToastPosition({ x: posX, y: posY }, workArea, toastSize);
-    const finalPosition = livePosition === 'custom'
+    const clampedPosition = configuredOverlay
+        ? { x: posX, y: posY }
+        : clampToastPosition({ x: posX, y: posY }, workArea, toastSize);
+    const finalPosition = configuredOverlay || livePosition === 'custom'
         ? clampedPosition
         : positionOutsideFixedArea(clampedPosition, workArea, display, toastSize);
 
     const targetX = Math.round(finalPosition.x);
     const targetY = Math.round(finalPosition.y);
-    const [currentX, currentY] = currentToast.getPosition();
-    if (currentX !== targetX || currentY !== targetY) {
+    const currentBounds = currentToast.getBounds();
+    const boundsChanged = currentBounds.x !== targetX
+        || currentBounds.y !== targetY
+        || currentBounds.width !== toastSize.width
+        || currentBounds.height !== toastSize.height;
+    if (boundsChanged) {
         isPositioningToast = true;
-        currentToast.setPosition(targetX, targetY);
+        currentToast.setBounds({
+            x: targetX,
+            y: targetY,
+            width: toastSize.width,
+            height: toastSize.height
+        }, false);
         setTimeout(() => {
             if (toastWindow === currentToast) {
                 isPositioningToast = false;
@@ -749,6 +1049,77 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
     }, 20000);
 }
 
+function redisplayToastAfterLayoutChange(options = {}) {
+    if (!isWindowAlive(toastWindow) || !pendingToastPayload) {
+        return;
+    }
+    const text = pendingToastPayload.text;
+    const currentBounds = toastWindow.getBounds();
+    let display = screen.getDisplayMatching(currentBounds);
+    let anchorPoint = {
+        x: currentBounds.x,
+        y: currentBounds.y
+    };
+    if (fixedCaptureRegion) {
+        const captureDisplay = screen.getAllDisplays().find(
+            item => Number(item.id) === Number(fixedCaptureRegion.displayId)
+        );
+        if (captureDisplay) {
+            display = captureDisplay;
+            anchorPoint = {
+                x: captureDisplay.bounds.x + fixedCaptureRegion.selection.x,
+                y: captureDisplay.bounds.y + fixedCaptureRegion.selection.y
+            };
+        }
+    }
+    if (options.recreate !== false) {
+        closeToastWindow();
+    }
+    showToast(text, anchorPoint.x, anchorPoint.y, settings, display);
+}
+
+function refreshOverlayForDisplayChanges() {
+    if (!overlayRegion) {
+        return;
+    }
+    const resolved = resolvedOverlayArea();
+    if (!resolved) {
+        publishOverlayAreaState();
+        closeToastWindow();
+        return;
+    }
+    const previous = serializeOverlayRegion(overlayRegion);
+    overlayRegion = resolved.region;
+    if (serializeOverlayRegion(overlayRegion) !== previous) {
+        persistOverlayArea();
+    }
+    publishOverlayAreaState();
+    redisplayToastAfterLayoutChange({ recreate: false });
+}
+
+function scheduleOverlayRefreshForDisplayChanges() {
+    if (displayRefreshTimer) {
+        clearTimeout(displayRefreshTimer);
+    }
+    displayRefreshTimer = setTimeout(() => {
+        displayRefreshTimer = null;
+        refreshOverlayForDisplayChanges();
+    }, 150);
+}
+
+function refreshFixedCaptureAfterOverlayChange() {
+    if (!fixedCaptureRegion || overlayEditorSuspendedCapture) {
+        return;
+    }
+    fixedCaptureTracker.reset();
+    fixedCaptureCadence.reset();
+    fixedCaptureLastError = '';
+    fixedCaptureBypassCache = false;
+    if (!fixedCaptureRunning) {
+        scheduleFixedCapture(fixedCaptureGeneration, 0);
+    }
+}
+
 function getSourceForDisplay(sources, display) {
     const displayId = String(display.id);
     const matchingSource = sources.find(source => String(source.display_id) === displayId);
@@ -764,8 +1135,14 @@ async function startSnip(mode = 'fixed') {
     if (mode !== 'fixed' && mode !== 'temporary') {
         return;
     }
-    if (isStartingSnip || isWindowAlive(snipWindow)) {
+    if (isStartingSnip || isWindowAlive(snipWindow) || isStartingOverlayEditor) {
         return;
+    }
+    if (isWindowAlive(overlayEditorWindow)) {
+        finishOverlayEditor(overlayEditorWindow, {
+            resumeCapture: false,
+            showSettings: false
+        });
     }
 
     stopFixedCapture();
@@ -1220,7 +1597,13 @@ function updateSettings(newSettings) {
     }
 
     if (pendingToastPayload) {
-        pendingToastPayload = { ...pendingToastPayload, style: { ...settings } };
+        pendingToastPayload = {
+            ...pendingToastPayload,
+            style: {
+                ...settings,
+                overlayAreaConfigured: Boolean(resolvedOverlayArea())
+            }
+        };
         if (toastReady) {
             sendToWindow(toastWindow, 'set-text', pendingToastPayload);
         }
@@ -1488,6 +1871,10 @@ app.whenReady().then(() => {
     if (process.platform === 'darwin' && app.dock) {
         app.dock.setIcon(APP_ICON_PATH);
     }
+    loadOverlayArea();
+    screen.on('display-added', scheduleOverlayRefreshForDisplayChanges);
+    screen.on('display-removed', scheduleOverlayRefreshForDisplayChanges);
+    screen.on('display-metrics-changed', scheduleOverlayRefreshForDisplayChanges);
     void bridgeRuntime.start();
     createSettingsWindow();
     createIntroWindow();
@@ -1497,6 +1884,14 @@ app.whenReady().then(() => {
         if (!shortcutResult.ok) {
             console.error(`Could not register default ${action} shortcut: ${shortcutResult.error}`);
         }
+    }
+});
+
+app.on('before-quit', () => {
+    isQuitting = true;
+    if (displayRefreshTimer) {
+        clearTimeout(displayRefreshTimer);
+        displayRefreshTimer = null;
     }
 });
 
@@ -1512,6 +1907,12 @@ app.on('will-quit', () => {
         introFallbackTimer = null;
     }
     cancelActiveTranslation();
+    if (isWindowAlive(overlayEditorWindow)) {
+        finishOverlayEditor(overlayEditorWindow, {
+            resumeCapture: false,
+            showSettings: false
+        });
+    }
     stopFixedCapture();
     globalShortcut.unregisterAll();
     stopSideMouseShortcut();
@@ -1570,6 +1971,33 @@ ipcMain.handle('fixed-area-state', event => {
         return { active: false, selecting: false };
     }
     return getFixedAreaState();
+});
+
+ipcMain.on('edit-overlay-area', event => {
+    if (!isEventFromWindow(event, settingsWindow)) {
+        return;
+    }
+    void startOverlayEditor();
+});
+
+ipcMain.on('reset-overlay-area', event => {
+    if (!isEventFromWindow(event, settingsWindow)) {
+        return;
+    }
+    if (!clearOverlayArea()) {
+        console.error('[overlay] Could not remove the saved overlay area.');
+        sendToWindow(settingsWindow, 'overlay-area-error', 'Não foi possível remover a área salva.');
+        return;
+    }
+    redisplayToastAfterLayoutChange();
+    refreshFixedCaptureAfterOverlayChange();
+});
+
+ipcMain.handle('overlay-area-state', event => {
+    if (!isEventFromWindow(event, settingsWindow)) {
+        return { configured: false, editing: false, bounds: null };
+    }
+    return getOverlayAreaState();
 });
 
 ipcMain.handle('bridge-status', event => {
@@ -1634,6 +2062,41 @@ ipcMain.on('snip-cancel', event => {
     snipMode = null;
     closeWindow(currentSnip);
     publishFixedAreaState();
+});
+
+ipcMain.on('overlay-editor-save', event => {
+    const currentEditor = overlayEditorWindow;
+    if (!isEventFromWindow(event, currentEditor)) {
+        return;
+    }
+    const bounds = currentEditor.getBounds();
+    const display = screen.getDisplayMatching(bounds);
+    const region = regionFromWindowBounds(bounds, display);
+    if (!region || !setOverlayArea(region)) {
+        console.error('[overlay] Could not save the selected overlay area.');
+        sendToWindow(currentEditor, 'overlay-editor-error', 'Não foi possível salvar essa área.');
+        return;
+    }
+    finishOverlayEditor(currentEditor);
+});
+
+ipcMain.on('overlay-editor-reset', event => {
+    const currentEditor = overlayEditorWindow;
+    if (!isEventFromWindow(event, currentEditor)) {
+        return;
+    }
+    if (!clearOverlayArea()) {
+        sendToWindow(currentEditor, 'overlay-editor-error', 'Não foi possível salvar essa alteração.');
+        return;
+    }
+    finishOverlayEditor(currentEditor);
+});
+
+ipcMain.on('overlay-editor-cancel', event => {
+    const currentEditor = overlayEditorWindow;
+    if (isEventFromWindow(event, currentEditor)) {
+        finishOverlayEditor(currentEditor);
+    }
 });
 
 ipcMain.on('close-toast', event => {
