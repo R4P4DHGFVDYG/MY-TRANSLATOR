@@ -44,6 +44,37 @@ def test_default_engine_uses_windows_tesseract():
     assert DEFAULT_ENGINES == ["tesseract"]
 
 
+@pytest.mark.parametrize(("enabled", "expected_calls"), [(False, 0), (True, 1)])
+def test_text_region_isolation_is_opt_in(monkeypatch, enabled, expected_calls):
+    service = OcrService(
+        BridgeConfig(
+            ocr_max_variants=1,
+            ocr_isolate_text_region=enabled,
+        )
+    )
+    isolation_calls: list[tuple[int, int]] = []
+
+    def fake_isolate(image):
+        isolation_calls.append(image.size)
+        return image.crop((0, 0, image.width // 2, image.height))
+
+    monkeypatch.setattr(ocr_module, "isolate_text_region", fake_isolate)
+    monkeypatch.setattr(
+        service,
+        "_run_windowsocr",
+        lambda _image, _language=None: EngineResult(
+            "windowsocr", "VISIBLE TEXT", 0.0, 0.0
+        ),
+    )
+
+    service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["windowsocr"],
+    )
+
+    assert len(isolation_calls) == expected_calls
+
+
 def test_windows_ocr_engine_can_be_requested(monkeypatch):
     service = OcrService(BridgeConfig(ocr_max_variants=1))
     monkeypatch.setattr(

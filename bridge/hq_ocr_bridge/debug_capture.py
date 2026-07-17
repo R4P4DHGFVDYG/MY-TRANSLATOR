@@ -42,7 +42,11 @@ class DebugCapture:
             created = True
 
             crop.save(self.directory / "crop.png")
-            ocr_region = isolate_text_region(crop)
+            ocr_region = (
+                isolate_text_region(crop)
+                if config.ocr_isolate_text_region
+                else crop
+            )
             ocr_region.save(self.directory / "ocr-region.png")
             preprocessing_profile = str(
                 payload.get("ocrPreprocessing") or "standard"

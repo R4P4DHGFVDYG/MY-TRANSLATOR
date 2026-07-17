@@ -633,15 +633,7 @@ def test_debug_capture_limit_preserves_existing_captures(tmp_path):
     assert [item.name for item in tmp_path.iterdir()] == ["existing-capture"]
 
 
-def test_debug_capture_saves_the_isolated_text_region(tmp_path):
-    app = create_app(
-        BridgeConfig(
-            debug_capture_dir=str(tmp_path),
-            allow_request_debug_captures=True,
-        ),
-        ocr_service=FakeOcrService(),
-        translator=FakeTranslator(),
-    )
+def test_debug_capture_respects_text_region_isolation_setting(tmp_path):
     image = Image.new("RGB", (600, 180), "black")
     draw = ImageDraw.Draw(image)
     draw.rectangle((20, 15, 130, 165), outline="white", width=8)
@@ -652,33 +644,47 @@ def test_debug_capture_saves_the_isolated_text_region(tmp_path):
             x = 220 + character * 25
             draw.rectangle((x, y, x + 12, y + 27), fill="white")
 
-    response = app.test_client().post(
-        "/v1/translate-selection",
-        json={
-            "imageDataUrl": _png_data_url(image),
-            "selection": {"x": 0, "y": 0, "width": 600, "height": 180},
-            "viewport": {"width": 600, "height": 180},
-            "debug": True,
-        },
-    )
+    for isolation_enabled in (False, True):
+        capture_root = tmp_path / str(isolation_enabled).lower()
+        app = create_app(
+            BridgeConfig(
+                debug_capture_dir=str(capture_root),
+                allow_request_debug_captures=True,
+                ocr_isolate_text_region=isolation_enabled,
+            ),
+            ocr_service=FakeOcrService(),
+            translator=FakeTranslator(),
+        )
+        response = app.test_client().post(
+            "/v1/translate-selection",
+            json={
+                "imageDataUrl": _png_data_url(image),
+                "selection": {"x": 0, "y": 0, "width": 600, "height": 180},
+                "viewport": {"width": 600, "height": 180},
+                "debug": True,
+            },
+        )
 
-    assert response.status_code == 200
-    debug_dir = tmp_path / response.get_json()["debugCapture"]["id"]
-    with Image.open(debug_dir / "crop.png") as crop:
-        assert crop.size == (600, 180)
-    with Image.open(debug_dir / "ocr-region.png") as ocr_region:
-        region_size = ocr_region.size
+        assert response.status_code == 200
+        debug_dir = capture_root / response.get_json()["debugCapture"]["id"]
+        with Image.open(debug_dir / "crop.png") as crop:
+            assert crop.size == (600, 180)
+        with Image.open(debug_dir / "ocr-region.png") as ocr_region:
+            region_size = ocr_region.size
 
-    request_metadata = json.loads(
-        (debug_dir / "request.json").read_text(encoding="utf-8")
-    )
-    assert 340 <= region_size[0] <= 410
-    assert region_size[1] == 180
-    assert request_metadata["ocrRegion"] == {
-        "width": region_size[0],
-        "height": region_size[1],
-        "cropped": True,
-    }
+        request_metadata = json.loads(
+            (debug_dir / "request.json").read_text(encoding="utf-8")
+        )
+        if isolation_enabled:
+            assert 340 <= region_size[0] <= 410
+        else:
+            assert region_size[0] == 600
+        assert region_size[1] == 180
+        assert request_metadata["ocrRegion"] == {
+            "width": region_size[0],
+            "height": region_size[1],
+            "cropped": isolation_enabled,
+        }
 
 
 def _png_data_url(image: Image.Image | None = None) -> str:

@@ -108,6 +108,7 @@ class OcrService:
                 "maxVariants": self.config.ocr_max_variants,
                 "acceptScore": self.config.ocr_accept_score,
                 "acceptConfidence": self.config.ocr_accept_confidence,
+                "isolateTextRegion": self.config.ocr_isolate_text_region,
                 "cacheCapacity": self.config.ocr_cache_capacity,
                 "cacheTtlSeconds": self.config.ocr_cache_ttl_seconds,
                 "warmupOnStart": self.config.ocr_warmup_on_start,
@@ -251,7 +252,11 @@ class OcrService:
 
             _raise_if_cancelled(cancel_check)
 
-            recognition_image = isolate_text_region(image)
+            recognition_image = (
+                isolate_text_region(image)
+                if self.config.ocr_isolate_text_region
+                else image
+            )
 
             if tuple(normalized_engines) == AUTOMATIC_PROFILE_ENGINES:
                 automatic_results, automatic_warnings = (

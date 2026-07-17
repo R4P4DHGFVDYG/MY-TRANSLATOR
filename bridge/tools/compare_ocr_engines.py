@@ -165,6 +165,7 @@ def main() -> int:
             runners,
             variants,
             ground_truth=ground_truth,
+            isolate_region=args.isolate_text_region,
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
@@ -174,6 +175,7 @@ def main() -> int:
     output = {
         "images": [str(path) for path in images],
         "variants": variants,
+        "isolateTextRegion": args.isolate_text_region,
         "summary": summary,
         "records": records,
     }
@@ -239,6 +241,11 @@ def parse_args() -> argparse.Namespace:
         "--all",
         action="store_true",
         help="Process all matching images. Heavy on CPU/RAM with PaddleOCR.",
+    )
+    parser.add_argument(
+        "--isolate-text-region",
+        action="store_true",
+        help="Try to remove a large side graphic before OCR.",
     )
     parser.add_argument("--easyocr-lang", default="en")
     parser.add_argument("--easyocr-model-dir", default="")
@@ -343,13 +350,14 @@ def compare_images(
     requested_variants: list[str],
     *,
     ground_truth: dict[str, str] | None = None,
+    isolate_region: bool = False,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for image_path in images:
         print(f"Processing {image_path.name}", flush=True)
         with Image.open(image_path) as source_image:
             image = source_image.convert("RGB")
-        recognition_image = isolate_text_region(image)
+        recognition_image = isolate_text_region(image) if isolate_region else image
         reference = lookup_ground_truth(image_path, ground_truth)
         engine_records = [
             run_engine(

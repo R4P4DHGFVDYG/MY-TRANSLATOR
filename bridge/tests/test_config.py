@@ -14,6 +14,7 @@ def test_performance_env_vars_are_loaded(monkeypatch):
     monkeypatch.setenv("HQ_OCR_MAX_VARIANTS", "1")
     monkeypatch.setenv("HQ_OCR_ACCEPT_SCORE", "0.75")
     monkeypatch.setenv("HQ_OCR_ACCEPT_CONFIDENCE", "0.7")
+    monkeypatch.setenv("HQ_OCR_ISOLATE_TEXT_REGION", "true")
     monkeypatch.setenv("HQ_OCR_WARMUP_ON_START", "yes")
     monkeypatch.setenv(
         "HQ_OCR_WARMUP_ENGINES", "windowsocr,tesseract,paddleocr"
@@ -31,6 +32,7 @@ def test_performance_env_vars_are_loaded(monkeypatch):
     assert config.ocr_max_variants == 1
     assert config.ocr_accept_score == 0.75
     assert config.ocr_accept_confidence == 0.7
+    assert config.ocr_isolate_text_region is True
     assert config.ocr_warmup_on_start is True
     assert config.ocr_warmup_engines == (
         "windowsocr",
@@ -70,6 +72,7 @@ def test_config_exposes_safety_limits_and_tesseract_default(
     assert config.ocr_max_variants == 2
     assert config.ocr_accept_score == 0.8
     assert config.ocr_accept_confidence == 0.78
+    assert config.ocr_isolate_text_region is False
     assert config.ocr_warmup_on_start is True
     assert config.ocr_warmup_engines == (
         "tesseract",

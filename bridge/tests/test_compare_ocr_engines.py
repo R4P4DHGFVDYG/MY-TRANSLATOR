@@ -92,6 +92,7 @@ def test_compare_images_isolates_region_and_uses_engine_specific_variants(
         [image_path],
         [tesseract, paddleocr],
         ["pixel", "contrast"],
+        isolate_region=True,
     )
 
     assert isolated_sizes == [(60, 20)]
@@ -103,6 +104,25 @@ def test_compare_images_isolates_region_and_uses_engine_specific_variants(
         variant["variant"]
         for variant in records[0]["engines"][1]["variants"]
     ] == ["contrast"]
+
+
+def test_compare_images_keeps_the_original_region_by_default(tmp_path, monkeypatch):
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (120, 40), "black").save(image_path)
+    monkeypatch.setattr(
+        compare_ocr_engines,
+        "isolate_text_region",
+        lambda _image: pytest.fail("region isolation must be opt-in"),
+    )
+
+    records = compare_images(
+        [image_path],
+        [_FakeRunner("tesseract")],
+        ["standard"],
+    )
+
+    assert records[0]["width"] == 120
+    assert records[0]["height"] == 40
 
 
 def test_compare_images_rejects_variant_unavailable_for_engine(tmp_path):

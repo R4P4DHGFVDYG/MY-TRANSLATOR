@@ -105,6 +105,7 @@ class BridgeConfig:
     ocr_max_variants: int = 2
     ocr_accept_score: float = 0.80
     ocr_accept_confidence: float = 0.78
+    ocr_isolate_text_region: bool = False
     ocr_cache_capacity: int = 128
     ocr_cache_ttl_seconds: float = 600.0
     ocr_warmup_on_start: bool = True
@@ -338,6 +339,10 @@ class BridgeConfig:
             ),
             ocr_accept_confidence=_float_from_env(
                 "HQ_OCR_ACCEPT_CONFIDENCE", cls.ocr_accept_confidence
+            ),
+            ocr_isolate_text_region=_bool_from_env(
+                "HQ_OCR_ISOLATE_TEXT_REGION",
+                cls.ocr_isolate_text_region,
             ),
             ocr_cache_capacity=_int_from_env(
                 "HQ_OCR_CACHE_CAPACITY", cls.ocr_cache_capacity
