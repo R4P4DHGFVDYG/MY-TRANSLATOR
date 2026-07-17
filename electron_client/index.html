@@ -639,14 +639,14 @@
                             <path d="M7 3H4a1 1 0 0 0-1 1v3m9-4h3a1 1 0 0 1 1 1v3M7 17H4a1 1 0 0 1-1-1v-3m9 4h3a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
                             <circle cx="10" cy="10" r="2.2" stroke="currentColor" stroke-width="1.5"/>
                         </svg>
-                        <span id="fixedAreaButtonLabel">Definir área automática</span>
+                        <span id="fixedAreaButtonLabel">Definir área</span>
                     </button>
                     <button class="capture-button secondary" id="overlayAreaButton" type="button" aria-describedby="overlayAreaStatus">
                         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
                             <rect x="4" y="4" width="12" height="12" stroke="currentColor" stroke-width="1.5"/>
                             <path d="M2.5 7V2.5H7M13 2.5h4.5V7M17.5 13v4.5H13M7 17.5H2.5V13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
                         </svg>
-                        <span id="overlayAreaButtonLabel">Definir área da tradução</span>
+                        <span id="overlayAreaButtonLabel">Definir sobreposição</span>
                     </button>
                     <div class="overlay-area-meta" id="overlayAreaStatus" role="status" aria-live="polite">
                         Usando a área de captura como padrão.
@@ -1087,7 +1087,7 @@
                 ? 'Selecionando área...'
                 : active
                     ? 'Parar tradução automática'
-                    : 'Definir área automática';
+                    : 'Definir área';
         }
 
         function updateOverlayAreaState(state) {
@@ -1105,10 +1105,10 @@
             button.classList.toggle('editing', editing);
             button.disabled = editing;
             label.textContent = editing
-                ? 'Ajustando área...'
+                ? 'Ajustando sobreposição...'
                 : configured
-                    ? 'Alterar área da tradução'
-                    : 'Definir área da tradução';
+                    ? 'Alterar sobreposição'
+                    : 'Definir sobreposição';
             status.textContent = editing
                 ? 'Arraste a área pela tela e redimensione pelas bordas.'
                 : configured
