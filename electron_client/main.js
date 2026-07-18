@@ -926,14 +926,14 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             transparent: true,
             alwaysOnTop: true,
             skipTaskbar: true,
-            focusable: !configuredOverlay,
+            focusable: false,
             hasShadow: false,
             show: false,
             webPreferences: getWebPreferences()
         });
         hardenWindow(currentToast);
         currentToast.setContentProtection(true);
-        currentToast.setIgnoreMouseEvents(Boolean(configuredOverlay), { forward: true });
+        currentToast.setIgnoreMouseEvents(true);
         toastWindow = currentToast;
         toastReady = false;
 
@@ -973,7 +973,6 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             }
         });
     } else {
-        currentToast.setIgnoreMouseEvents(Boolean(configuredOverlay), { forward: true });
         const [currentWidth, currentHeight] = currentToast.getSize();
         if (
             !configuredOverlay
@@ -983,7 +982,9 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
         }
         if (toastReady) {
             sendToWindow(currentToast, 'set-text', pendingToastPayload);
-            showOverlay(currentToast, true);
+            if (!currentToast.isVisible()) {
+                showOverlay(currentToast, true);
+            }
         }
     }
 

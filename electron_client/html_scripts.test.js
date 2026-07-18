@@ -24,7 +24,9 @@ for (const fileName of ['index.html', 'overlay_editor.html', 'toast.html']) {
 
 test('translation overlay keeps capture fallback and responsive overflow guards', () => {
     const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+    const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
     const toastHtml = fs.readFileSync(path.join(__dirname, 'toast.html'), 'utf8');
+    const showToastSource = mainSource.match(/function showToast[\s\S]*?function redisplayToastAfterLayoutChange/)?.[0] || '';
     assert.match(indexHtml, /id="overlayAreaButton"/);
     assert.doesNotMatch(indexHtml, /id="position"/);
     assert.doesNotMatch(indexHtml, /getElementById\(['"]position['"]\)/);
@@ -34,4 +36,10 @@ test('translation overlay keeps capture fallback and responsive overflow guards'
     assert.match(toastHtml, /max-height:\s*100%/);
     assert.match(toastHtml, /overflow-wrap:\s*anywhere/);
     assert.match(toastHtml, /createLatestFrameScheduler/);
+    assert.match(toastHtml, /class="toast-shell passive-overlay"/);
+    assert.match(showToastSource, /focusable:\s*false/);
+    assert.match(showToastSource, /setIgnoreMouseEvents\(true\)/);
+    assert.equal((showToastSource.match(/setIgnoreMouseEvents/g) || []).length, 1);
+    assert.doesNotMatch(showToastSource, /forward\s*:\s*true/);
+    assert.match(showToastSource, /if \(!currentToast\.isVisible\(\)\)\s*{\s*showOverlay\(currentToast, true\)/);
 });
