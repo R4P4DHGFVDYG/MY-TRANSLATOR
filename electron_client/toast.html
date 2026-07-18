@@ -50,23 +50,20 @@
             background: rgba(22, 13, 38, 0.94);
             cursor: grab;
             -webkit-app-region: drag;
-            animation: toastIn 220ms cubic-bezier(.2, .8, .2, 1);
         }
 
         .toast-shell:active {
             cursor: grabbing;
         }
 
-        .toast-shell.configured-overlay,
-        .toast-shell.passive-overlay {
+        .toast-shell.configured-overlay {
             padding: clamp(6px, 3vmin, 16px);
             cursor: default;
             -webkit-app-region: no-drag;
         }
 
         .toast-shell.configured-overlay .close-button,
-        .toast-shell.configured-overlay .toast-header,
-        .toast-shell.passive-overlay .close-button {
+        .toast-shell.configured-overlay .toast-header {
             display: none;
         }
 
@@ -199,18 +196,13 @@
             }
         }
 
-        @keyframes toastIn {
-            from { opacity: 0; transform: translateY(10px) scale(0.975); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
-    <div class="toast-shell passive-overlay" id="toastBox">
+    <div class="toast-shell" id="toastBox">
         <button class="close-button" id="closeButton" type="button" aria-label="Fechar tradução">
             <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="m4 4 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>

@@ -23,6 +23,10 @@ const {
     serializeOverlayRegion
 } = require('./overlay_area');
 const { readOverlayRegion, writeOverlayRegion } = require('./overlay_store');
+const {
+    ScreenCaptureRuntime,
+    isScreenCaptureLifecycleError
+} = require('./screen_capture');
 const { LANGUAGE_CODES, languageOptions } = require('./language_catalog');
 const {
     OCR_ENGINES,
@@ -63,6 +67,12 @@ const bridgeRuntime = new BridgeRuntime({
     resourcesPath: process.resourcesPath,
     readyUrl: BRIDGE_READY_URL
 });
+const screenCaptureRuntime = new ScreenCaptureRuntime({
+    BrowserWindow,
+    desktopCapturer,
+    baseDir: __dirname,
+    getDisplays: () => screen.getAllDisplays()
+});
 
 let settingsWindow = null;
 let introWindow = null;
@@ -90,9 +100,12 @@ let nextTranslationId = 0;
 let fixedCaptureRegion = null;
 let fixedCaptureTimer = null;
 let fixedCaptureGeneration = 0;
-let fixedCaptureRunning = false;
+let fixedCaptureRunningGeneration = null;
 let fixedCaptureLastError = '';
 let fixedCaptureBypassCache = false;
+let persistentCaptureUnavailable = process.platform !== 'win32';
+let persistentCaptureWarningShown = false;
+let persistentCaptureSessionId = 0;
 let systemFontsCache = null;
 let isQuitting = false;
 let displayRefreshTimer = null;
@@ -105,7 +118,8 @@ const fixedCaptureCadence = new AdaptiveCaptureCadence({
 });
 const fixedTranslationQueue = new LatestTaskQueue(
     job => processFixedCapturedFrame(job),
-    error => console.error('Fixed translation queue failed:', error)
+    error => console.error('Fixed translation queue failed:', error),
+    job => releaseCapturedFrame(job?.capturedFrame)
 );
 
 app.setName(APP_NAME);
@@ -323,7 +337,10 @@ function suspendFixedCaptureForOverlayEditor() {
         fixedCaptureTimer = null;
     }
     fixedCaptureGeneration += 1;
+    fixedCaptureRunningGeneration = null;
+    invalidatePersistentCaptureSession();
     fixedTranslationQueue.clearPending();
+    void screenCaptureRuntime.stop();
     cancelActiveTranslation();
     nextTranslationId += 1;
 }
@@ -335,6 +352,7 @@ function resumeFixedCaptureAfterOverlayEditor() {
         return;
     }
     fixedCaptureGeneration += 1;
+    resetPersistentCaptureFallback();
     fixedCaptureTracker.reset();
     fixedCaptureCadence.reset();
     fixedCaptureLastError = '';
@@ -350,8 +368,10 @@ function stopFixedCapture() {
     }
     fixedCaptureGeneration += 1;
     fixedCaptureRegion = null;
-    fixedCaptureRunning = false;
+    fixedCaptureRunningGeneration = null;
+    invalidatePersistentCaptureSession();
     fixedTranslationQueue.clearPending();
+    void screenCaptureRuntime.stop();
     fixedCaptureTracker.reset();
     fixedCaptureCadence.reset();
     fixedCaptureLastError = '';
@@ -926,14 +946,21 @@ function showToast(text, x, y, currentSettings, preferredDisplay = null) {
             transparent: true,
             alwaysOnTop: true,
             skipTaskbar: true,
-            focusable: false,
+            focusable: !configuredOverlay,
+            resizable: false,
+            movable: !configuredOverlay,
+            minimizable: false,
+            maximizable: false,
+            fullscreenable: false,
+            thickFrame: false,
+            roundedCorners: false,
             hasShadow: false,
             show: false,
             webPreferences: getWebPreferences()
         });
         hardenWindow(currentToast);
         currentToast.setContentProtection(true);
-        currentToast.setIgnoreMouseEvents(true);
+        currentToast.setIgnoreMouseEvents(Boolean(configuredOverlay));
         toastWindow = currentToast;
         toastReady = false;
 
@@ -1123,7 +1150,7 @@ function refreshFixedCaptureAfterOverlayChange() {
     fixedCaptureCadence.reset();
     fixedCaptureLastError = '';
     fixedCaptureBypassCache = false;
-    if (!fixedCaptureRunning) {
+    if (fixedCaptureRunningGeneration !== fixedCaptureGeneration) {
         scheduleFixedCapture(fixedCaptureGeneration, 0);
     }
 }
@@ -1154,6 +1181,7 @@ async function startSnip(mode = 'fixed') {
     }
 
     stopFixedCapture();
+    resetPersistentCaptureFallback();
     isStartingSnip = true;
     snipMode = mode;
     cancelActiveTranslation();
@@ -1222,7 +1250,7 @@ function wait(milliseconds) {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
-async function captureSelection(selection, display, options = {}) {
+async function captureSelectionLegacy(selection, display, options = {}) {
     const totalStartedAt = performance.now();
     await wait(CAPTURE_SETTLE_MS);
 
@@ -1295,10 +1323,51 @@ async function captureSelection(selection, display, options = {}) {
     if (options.deferEncoding === true) {
         return capturedFrame;
     }
-    return encodeCapturedSelection(capturedFrame, options);
+    return await encodeCapturedSelection(capturedFrame, options);
 }
 
-function encodeCapturedSelection(capturedFrame, options = {}) {
+async function captureSelection(selection, display, options = {}) {
+    const captureSessionId = persistentCaptureSessionId;
+    if (!persistentCaptureUnavailable) {
+        try {
+            await wait(CAPTURE_SETTLE_MS);
+            const capturedFrame = await screenCaptureRuntime.capture(selection, display, {
+                maxPixels: MAX_SNIP_PIXELS,
+                signatureWidth: PERCEPTUAL_SAMPLE_WIDTH,
+                signatureHeight: PERCEPTUAL_SAMPLE_HEIGHT
+            });
+            capturedFrame.captureSessionId = captureSessionId;
+            if (options.deferEncoding === true) {
+                return capturedFrame;
+            }
+            return await encodeCapturedSelection(capturedFrame, options);
+        } catch (error) {
+            if (
+                captureSessionId !== persistentCaptureSessionId
+                || isScreenCaptureLifecycleError(error)
+            ) {
+                throw error;
+            }
+            disablePersistentCapture(error, captureSessionId);
+        }
+    }
+    return captureSelectionLegacy(selection, display, options);
+}
+
+async function encodeCapturedSelection(capturedFrame, options = {}) {
+    if (capturedFrame?.captureBackend === 'stream') {
+        const result = await screenCaptureRuntime.encode(capturedFrame, {
+            maxBytes: BRIDGE_DEFAULT_MAX_IMAGE_BYTES
+        });
+        if (options.logPerformance !== false) {
+            console.info('[performance]', JSON.stringify({
+                stage: 'capture',
+                ...result.performance
+            }));
+        }
+        return result;
+    }
+
     const encodeStartedAt = performance.now();
     const png = capturedFrame.croppedImage.toPNG();
     const encodeMs = performance.now() - encodeStartedAt;
@@ -1327,6 +1396,36 @@ function encodeCapturedSelection(capturedFrame, options = {}) {
     return result;
 }
 
+function releaseCapturedFrame(capturedFrame) {
+    return screenCaptureRuntime.release(capturedFrame);
+}
+
+function resetPersistentCaptureFallback() {
+    invalidatePersistentCaptureSession();
+    persistentCaptureUnavailable = process.platform !== 'win32';
+    persistentCaptureWarningShown = false;
+}
+
+function invalidatePersistentCaptureSession() {
+    persistentCaptureSessionId += 1;
+}
+
+function disablePersistentCapture(error, captureSessionId = persistentCaptureSessionId) {
+    if (captureSessionId !== persistentCaptureSessionId) {
+        return false;
+    }
+    persistentCaptureUnavailable = true;
+    void screenCaptureRuntime.stop();
+    if (!persistentCaptureWarningShown) {
+        persistentCaptureWarningShown = true;
+        console.warn(
+            '[capture] Persistent stream unavailable; using screenshot fallback:',
+            error
+        );
+    }
+    return true;
+}
+
 async function translateTemporarySelection(selection, display) {
     const translationId = ++nextTranslationId;
     const anchorPoint = {
@@ -1336,11 +1435,13 @@ async function translateTemporarySelection(selection, display) {
 
     try {
         const captured = await captureSelection(selection, display);
+        void screenCaptureRuntime.stop();
         if (translationId !== nextTranslationId) {
             return;
         }
         await translateSelection(captured, anchorPoint, display, translationId);
     } catch (error) {
+        void screenCaptureRuntime.stop();
         if (translationId === nextTranslationId) {
             showToast(errorMessageForTranslation(error, false), anchorPoint.x, anchorPoint.y, settings, display);
         }
@@ -1365,6 +1466,7 @@ function scheduleFixedCapture(
 
 function startFixedCapture(selection, display) {
     stopFixedCapture();
+    resetPersistentCaptureFallback();
     fixedCaptureRegion = {
         selection: { ...selection },
         displayId: display.id
@@ -1379,12 +1481,12 @@ async function runFixedCapture(generation) {
     if (generation !== fixedCaptureGeneration || !fixedCaptureRegion) {
         return;
     }
-    if (fixedCaptureRunning) {
+    if (fixedCaptureRunningGeneration === generation) {
         scheduleFixedCapture(generation);
         return;
     }
 
-    fixedCaptureRunning = true;
+    fixedCaptureRunningGeneration = generation;
     const cycleStartedAt = performance.now();
     const region = fixedCaptureRegion;
     const display = screen.getAllDisplays().find(item => item.id === region.displayId);
@@ -1404,9 +1506,11 @@ async function runFixedCapture(generation) {
         x: display.bounds.x + region.selection.x,
         y: display.bounds.y + region.selection.y
     };
+    let capturedFrame = null;
+    let frameQueued = false;
 
     try {
-        const capturedFrame = await captureSelection(region.selection, display, {
+        capturedFrame = await captureSelection(region.selection, display, {
             deferEncoding: true,
             logPerformance: false
         });
@@ -1428,6 +1532,7 @@ async function runFixedCapture(generation) {
             bypassCache,
             queuedAt: performance.now()
         });
+        frameQueued = true;
         console.info('[performance]', JSON.stringify({
             stage: 'fixed-capture-change',
             frameDifference: Number(fixedCaptureTracker.lastFrameDifference.toFixed(4)),
@@ -1437,6 +1542,12 @@ async function runFixedCapture(generation) {
             ...capturedFrame.performance
         }));
     } catch (error) {
+        if (isScreenCaptureLifecycleError(error)) {
+            if (generation === fixedCaptureGeneration && fixedCaptureRegion) {
+                fixedCaptureTracker.retryCurrentFrame();
+            }
+            return;
+        }
         fixedCaptureCadence.noteError();
         if (generation === fixedCaptureGeneration && fixedCaptureRegion) {
             fixedCaptureTracker.retryCurrentFrame();
@@ -1448,7 +1559,12 @@ async function runFixedCapture(generation) {
             }
         }
     } finally {
-        fixedCaptureRunning = false;
+        if (capturedFrame && !frameQueued) {
+            releaseCapturedFrame(capturedFrame);
+        }
+        if (fixedCaptureRunningGeneration === generation) {
+            fixedCaptureRunningGeneration = null;
+        }
         const cycleElapsedMs = performance.now() - cycleStartedAt;
         scheduleFixedCapture(
             generation,
@@ -1462,12 +1578,14 @@ async function processFixedCapturedFrame(job) {
         job.generation !== fixedCaptureGeneration
         || !fixedCaptureRegion
     ) {
+        releaseCapturedFrame(job.capturedFrame);
+        job.capturedFrame = null;
         return;
     }
 
     const queueDelayMs = performance.now() - job.queuedAt;
     try {
-        const captured = encodeCapturedSelection(job.capturedFrame, {
+        const captured = await encodeCapturedSelection(job.capturedFrame, {
             logPerformance: false
         });
         job.capturedFrame = null;
@@ -1484,6 +1602,20 @@ async function processFixedCapturedFrame(job) {
             job.bypassCache
         );
     } catch (error) {
+        if (isScreenCaptureLifecycleError(error)) {
+            if (job.generation === fixedCaptureGeneration && fixedCaptureRegion) {
+                fixedCaptureTracker.retryCurrentFrame();
+                fixedCaptureBypassCache = true;
+                scheduleFixedCapture(job.generation, 0);
+            }
+            return;
+        }
+        if (
+            job.capturedFrame?.captureBackend === 'stream'
+            && screenCaptureRuntime.owns(job.capturedFrame)
+        ) {
+            disablePersistentCapture(error, job.capturedFrame.captureSessionId);
+        }
         if (
             job.generation !== fixedCaptureGeneration
             || !fixedCaptureRegion
@@ -1505,6 +1637,11 @@ async function processFixedCapturedFrame(job) {
             );
         }
         scheduleFixedCapture(job.generation, FIXED_CAPTURE_ACTIVE_INTERVAL_MS);
+    } finally {
+        if (job.capturedFrame) {
+            releaseCapturedFrame(job.capturedFrame);
+            job.capturedFrame = null;
+        }
     }
 }
 
@@ -1696,7 +1833,10 @@ function updateSettings(newSettings) {
         fixedCaptureCadence.reset();
         fixedCaptureLastError = '';
         fixedCaptureBypassCache = true;
-        if (fixedCaptureRegion && !fixedCaptureRunning) {
+        if (
+            fixedCaptureRegion
+            && fixedCaptureRunningGeneration !== fixedCaptureGeneration
+        ) {
             scheduleFixedCapture(fixedCaptureGeneration, 0);
         }
     }
@@ -1992,6 +2132,7 @@ app.on('will-quit', () => {
     stopFixedCapture();
     globalShortcut.unregisterAll();
     stopSideMouseShortcut();
+    void screenCaptureRuntime.stop();
     bridgeRuntime.stop();
 });
 

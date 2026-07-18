@@ -36,10 +36,49 @@ test('translation overlay keeps capture fallback and responsive overflow guards'
     assert.match(toastHtml, /max-height:\s*100%/);
     assert.match(toastHtml, /overflow-wrap:\s*anywhere/);
     assert.match(toastHtml, /createLatestFrameScheduler/);
-    assert.match(toastHtml, /class="toast-shell passive-overlay"/);
-    assert.match(showToastSource, /focusable:\s*false/);
-    assert.match(showToastSource, /setIgnoreMouseEvents\(true\)/);
+    assert.match(showToastSource, /focusable:\s*!configuredOverlay/);
+    assert.match(showToastSource, /setIgnoreMouseEvents\(Boolean\(configuredOverlay\)\)/);
+    assert.match(showToastSource, /resizable:\s*false/);
+    assert.match(showToastSource, /thickFrame:\s*false/);
     assert.equal((showToastSource.match(/setIgnoreMouseEvents/g) || []).length, 1);
     assert.doesNotMatch(showToastSource, /forward\s*:\s*true/);
     assert.match(showToastSource, /if \(!currentToast\.isVisible\(\)\)\s*{\s*showOverlay\(currentToast, true\)/);
+    assert.doesNotMatch(toastHtml, /animation:\s*toastIn/);
+});
+
+test('continuous capture isolates late work from a newer area', () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+    const suspendSource = mainSource.match(
+        /function suspendFixedCaptureForOverlayEditor[\s\S]*?function resumeFixedCaptureAfterOverlayEditor/
+    )?.[0] || '';
+    const stopSource = mainSource.match(
+        /function stopFixedCapture[\s\S]*?function stopAreaCapture/
+    )?.[0] || '';
+    const runSource = mainSource.match(
+        /async function runFixedCapture[\s\S]*?async function processFixedCapturedFrame/
+    )?.[0] || '';
+    const processSource = mainSource.match(
+        /async function processFixedCapturedFrame[\s\S]*?async function processFixedTranslation/
+    )?.[0] || '';
+
+    assert.match(suspendSource, /invalidatePersistentCaptureSession\(\)/);
+    assert.match(stopSource, /invalidatePersistentCaptureSession\(\)/);
+    assert.match(
+        runSource,
+        /if \(fixedCaptureRunningGeneration === generation\)\s*{[\s\S]*?fixedCaptureRunningGeneration = null/
+    );
+    assert.match(
+        processSource,
+        /screenCaptureRuntime\.owns\(job\.capturedFrame\)[\s\S]*?disablePersistentCapture/
+    );
+});
+
+test('capture worker requests a low-rate stream and ignores an ended old stream', () => {
+    const workerSource = fs.readFileSync(path.join(__dirname, 'capture_worker.js'), 'utf8');
+
+    assert.match(
+        workerSource,
+        /getDisplayMedia\([\s\S]*?frameRate:\s*{[\s\S]*?max:\s*maximumFrameRate/
+    );
+    assert.match(workerSource, /if \(stream !== nextStream\)\s*{\s*return;/);
 });

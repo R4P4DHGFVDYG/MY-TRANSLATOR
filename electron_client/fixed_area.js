@@ -6,7 +6,7 @@ const DEFAULT_FRAME_DIFFERENCE_THRESHOLD = 0.003;
 const TEMPORAL_CANDIDATE_LIMIT = 2;
 
 class LatestTaskQueue {
-    constructor(worker, onError = null) {
+    constructor(worker, onError = null, onDiscard = null) {
         if (typeof worker !== 'function') {
             throw new TypeError('LatestTaskQueue requires a worker function.');
         }
@@ -14,6 +14,7 @@ class LatestTaskQueue {
         this.onError = typeof onError === 'function'
             ? onError
             : error => console.error('Latest task queue worker failed:', error);
+        this.onDiscard = typeof onDiscard === 'function' ? onDiscard : null;
         this.running = false;
         this.pending = null;
         this.idlePromise = Promise.resolve();
@@ -23,6 +24,9 @@ class LatestTaskQueue {
     enqueue(task) {
         if (this.running) {
             const replaced = this.pending !== null;
+            if (replaced) {
+                this.discard(this.pending);
+            }
             this.pending = task;
             return { started: false, replaced };
         }
@@ -37,8 +41,22 @@ class LatestTaskQueue {
 
     clearPending() {
         const cleared = this.pending !== null;
+        if (cleared) {
+            this.discard(this.pending);
+        }
         this.pending = null;
         return cleared;
+    }
+
+    discard(task) {
+        if (!this.onDiscard) {
+            return;
+        }
+        try {
+            this.onDiscard(task);
+        } catch (error) {
+            this.onError(error);
+        }
     }
 
     whenIdle() {

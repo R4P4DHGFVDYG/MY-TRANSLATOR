@@ -236,6 +236,7 @@ test('latest task queue runs one OCR and keeps only the newest pending frame', a
 test('latest task queue can discard a pending frame when capture stops', async () => {
     let releaseFirst;
     const processed = [];
+    const discarded = [];
     const queue = new LatestTaskQueue(async frame => {
         processed.push(frame);
         if (frame === 'active') {
@@ -243,11 +244,14 @@ test('latest task queue can discard a pending frame when capture stops', async (
                 releaseFirst = resolve;
             });
         }
-    });
+    }, null, frame => discarded.push(frame));
 
     queue.enqueue('active');
     queue.enqueue('obsolete-pending');
+    queue.enqueue('latest-pending');
+    assert.deepEqual(discarded, ['obsolete-pending']);
     assert.equal(queue.clearPending(), true);
+    assert.deepEqual(discarded, ['obsolete-pending', 'latest-pending']);
     releaseFirst();
     await queue.whenIdle();
 

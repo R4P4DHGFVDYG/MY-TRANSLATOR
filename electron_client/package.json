@@ -5,7 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test appearance.test.js bridge_runtime.test.js fixed_area.test.js html_scripts.test.js language_catalog.test.js ocr_profile.test.js overlay_area.test.js overlay_store.test.js preload.test.js shortcut.test.js text_fit.test.js && node --check bridge_runtime.js && node --check main.js && node --check overlay_area.js && node --check overlay_smoke.js && node --check overlay_store.js && node --check preload.js && node --check text_fit.js",
+    "test": "node --test appearance.test.js bridge_runtime.test.js fixed_area.test.js html_scripts.test.js language_catalog.test.js ocr_profile.test.js overlay_area.test.js overlay_store.test.js preload.test.js screen_capture.test.js shortcut.test.js text_fit.test.js && node --check bridge_runtime.js && node --check capture_smoke.js && node --check capture_worker.js && node --check main.js && node --check overlay_area.js && node --check overlay_smoke.js && node --check overlay_store.js && node --check preload.js && node --check screen_capture.js && node --check text_fit.js",
+    "test:capture-smoke": "electron capture_smoke.js",
     "test:overlay-smoke": "electron overlay_smoke.js"
   },
   "keywords": [],
