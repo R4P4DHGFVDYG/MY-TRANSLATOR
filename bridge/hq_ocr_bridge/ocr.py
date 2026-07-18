@@ -39,6 +39,7 @@ SUPPORTED_OCR_PREPROCESSING_PROFILES = frozenset(
 AUTOMATIC_NEAR_CONSENSUS_MIN_LENGTH = 20
 AUTOMATIC_NEAR_CONSENSUS_SIMILARITY = 0.96
 AUTOMATIC_NEAR_CONSENSUS_WINDOWS_SCORE = 0.60
+EASYOCR_COLD_START_TIMEOUT_SECONDS = 30.0
 PADDLEOCR_LANGUAGE_RECOGNITION_MODELS = {
     "en": "en_PP-OCRv5_mobile_rec",
     "pt": "latin_PP-OCRv5_mobile_rec",
@@ -610,16 +611,18 @@ class OcrService:
         for variant_name, prepared in engine_variants:
             _raise_if_cancelled(cancel_check)
             attempted += 1
+            engine_timeout = self._engine_timeout_seconds(normalized_engine)
             try:
                 result = self._run_engine_with_timeout(
                     normalized_engine,
                     prepared,
                     language_tag,
+                    timeout=engine_timeout,
                 )
             except TimeoutError:
                 message = (
                     f"{normalized_engine} timed out on {variant_name} after "
-                    f"{self.config.ocr_engine_timeout_seconds:g}s"
+                    f"{engine_timeout:g}s"
                 )
                 warnings.append(message)
                 results.append(
@@ -712,8 +715,11 @@ class OcrService:
         normalized_engine: str,
         image: Image.Image,
         language_tag: str | None = None,
+        *,
+        timeout: float | None = None,
     ) -> EngineResult:
-        timeout = self.config.ocr_engine_timeout_seconds
+        if timeout is None:
+            timeout = self._engine_timeout_seconds(normalized_engine)
         if not self._acquire_engine_slot(timeout):
             raise OcrCapacityError("OCR engine capacity is busy")
         if timeout <= 0:
@@ -738,6 +744,12 @@ class OcrService:
         except TimeoutError:
             future.cancel()
             raise
+
+    def _engine_timeout_seconds(self, normalized_engine: str) -> float:
+        configured = self.config.ocr_engine_timeout_seconds
+        if normalized_engine == "easyocr" and self._easyocr_reader is None:
+            return max(configured, EASYOCR_COLD_START_TIMEOUT_SECONDS)
+        return configured
 
     def _acquire_engine_slot(self, timeout: float) -> bool:
         if timeout <= 0:

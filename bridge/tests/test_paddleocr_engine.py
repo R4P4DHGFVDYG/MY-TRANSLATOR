@@ -1272,6 +1272,31 @@ def test_ocr_engine_timeout_returns_warning(monkeypatch):
     assert "timed out" in warnings[0]
 
 
+def test_easyocr_cold_start_uses_a_longer_timeout(monkeypatch):
+    service = OcrService(BridgeConfig(ocr_engine_timeout_seconds=0.01))
+    observed_timeouts = []
+
+    def timeout_easyocr(_engine, _image, _language=None, *, timeout=None):
+        observed_timeouts.append(timeout)
+        raise TimeoutError
+
+    monkeypatch.setattr(service, "_run_engine_with_timeout", timeout_easyocr)
+
+    best, results, warnings = service.detect_text(
+        Image.new("RGB", (120, 40), "white"),
+        ["easyocr"],
+    )
+
+    assert best is None
+    assert results[0].engine == "easyocr:standard"
+    assert observed_timeouts == [ocr_module.EASYOCR_COLD_START_TIMEOUT_SECONDS]
+    assert "after 30s" in warnings[0]
+
+    service._easyocr_reader = object()
+    assert service._engine_timeout_seconds("easyocr") == 0.01
+    assert service._engine_timeout_seconds("paddleocr") == 0.01
+
+
 def test_ocr_rejects_requests_when_its_bounded_capacity_is_exhausted():
     service = OcrService(
         BridgeConfig(
