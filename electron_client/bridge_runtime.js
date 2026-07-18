@@ -43,10 +43,19 @@ function resolveBridgeLaunch(options = {}) {
 
     const { bridgeDir } = bridgeLayout;
     if (existsSync(bridgeLayout.packagedExecutable)) {
+        const bundledEasyOcrModelDir = path.join(bridgeDir, '.EasyOCR', 'model');
+        const launchEnv = {};
+        if (
+            !String(env.HQ_OCR_EASYOCR_MODEL_DIR || '').trim()
+            && existsSync(bundledEasyOcrModelDir)
+        ) {
+            launchEnv.HQ_OCR_EASYOCR_MODEL_DIR = bundledEasyOcrModelDir;
+        }
         return {
             command: bridgeLayout.packagedExecutable,
             args: [],
-            cwd: bridgeDir
+            cwd: bridgeDir,
+            env: launchEnv
         };
     }
 
@@ -172,6 +181,7 @@ class BridgeRuntime {
                 cwd: launch.cwd,
                 env: {
                     ...this.env,
+                    ...(launch.env || {}),
                     PYTHONUNBUFFERED: '1'
                 },
                 shell: false,

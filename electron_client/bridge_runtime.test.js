@@ -67,18 +67,21 @@ test('resolves the self-contained bridge from packaged resources', () => {
     const resourcesPath = path.join('C:\\Program Files', 'GRC Translator', 'resources');
     const bridgeDir = path.join(resourcesPath, 'bridge');
     const executable = path.join(bridgeDir, 'hq-ocr-bridge.exe');
+    const easyOcrModelDir = path.join(bridgeDir, '.EasyOCR', 'model');
+    const existing = new Set([executable, easyOcrModelDir].map(path.normalize));
 
     const launch = resolveBridgeLaunch({
         baseDir,
         resourcesPath,
         env: {},
         platform: 'win32',
-        existsSync: candidate => path.normalize(candidate) === path.normalize(executable)
+        existsSync: candidate => existing.has(path.normalize(candidate))
     });
 
     assert.equal(launch.command, executable);
     assert.equal(launch.cwd, bridgeDir);
     assert.deepEqual(launch.args, []);
+    assert.equal(launch.env.HQ_OCR_EASYOCR_MODEL_DIR, easyOcrModelDir);
 });
 
 test('reuses a bridge that is already running without spawning another process', async () => {
