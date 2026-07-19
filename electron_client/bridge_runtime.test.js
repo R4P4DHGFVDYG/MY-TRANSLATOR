@@ -113,7 +113,8 @@ test('starts the local bridge and reports warming while its port opens', async (
     const terminated = [];
     const runtime = new BridgeRuntime({
         baseDir: layout.baseDir,
-        env: { CUSTOM_SETTING: 'kept' },
+        env: { CUSTOM_SETTING: 'kept', HQ_OCR_OWNER_PID: '9999' },
+        ownerPid: 2468,
         platform: 'win32',
         existsSync: layout.existsSync,
         fetchImpl: async () => {
@@ -142,6 +143,7 @@ test('starts the local bridge and reports warming while its port opens', async (
     assert.equal(spawnCalls[0].options.shell, false);
     assert.equal(spawnCalls[0].options.windowsHide, true);
     assert.equal(spawnCalls[0].options.env.CUSTOM_SETTING, 'kept');
+    assert.equal(spawnCalls[0].options.env.HQ_OCR_OWNER_PID, '2468');
     assert.equal(spawnCalls[0].options.env.PYTHONUNBUFFERED, '1');
 
     runtime.stop();

@@ -117,6 +117,9 @@ class BridgeRuntime {
         this.existsSync = options.existsSync || fs.existsSync;
         this.fetchImpl = options.fetchImpl || globalThis.fetch;
         this.spawnImpl = options.spawnImpl || spawnProcess;
+        this.ownerPid = Number.isInteger(options.ownerPid) && options.ownerPid > 0
+            ? options.ownerPid
+            : process.pid;
         this.terminateProcessTree = options.terminateProcessTree
             || terminateOwnedProcess;
         this.logger = options.logger || console;
@@ -186,6 +189,7 @@ class BridgeRuntime {
                 env: {
                     ...this.env,
                     ...(launch.env || {}),
+                    HQ_OCR_OWNER_PID: String(this.ownerPid),
                     PYTHONUNBUFFERED: '1'
                 },
                 shell: false,

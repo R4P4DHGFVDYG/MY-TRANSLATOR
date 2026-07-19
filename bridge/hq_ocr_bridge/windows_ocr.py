@@ -6,10 +6,13 @@ from concurrent.futures.process import BrokenProcessPool
 from io import BytesIO
 import math
 import multiprocessing
+import os
 import threading
 from typing import Any
 
 from PIL import Image
+
+from .process_lifetime import start_parent_watchdog
 
 
 MAX_IMAGE_DIMENSION = 2600
@@ -69,6 +72,8 @@ class WindowsOcrAdapter:
             self._executor = ProcessPoolExecutor(
                 max_workers=1,
                 mp_context=multiprocessing.get_context("spawn"),
+                initializer=start_parent_watchdog,
+                initargs=(os.getpid(),),
             )
         return self._executor
 

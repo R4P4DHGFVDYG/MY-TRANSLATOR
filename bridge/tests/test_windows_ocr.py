@@ -15,6 +15,7 @@ from hq_ocr_bridge.windows_ocr import (
     _warm_up_worker,
     _worker_engine_for,
 )
+from hq_ocr_bridge.process_lifetime import start_parent_watchdog
 
 
 def _word(text: str, x: float, y: float, width: float = 40, height: float = 20):
@@ -152,6 +153,23 @@ def test_windows_ocr_warmup_starts_worker_and_resolves_language():
 
     assert adapter.warm_up() == "en-US"
     assert submitted == [(_warm_up_worker, "en-US")]
+
+
+def test_windows_ocr_worker_watches_its_bridge_parent(monkeypatch):
+    created: list[dict[str, object]] = []
+
+    class WatchingExecutor:
+        def __init__(self, **options):
+            created.append(options)
+
+    monkeypatch.setattr(windows_ocr, "ProcessPoolExecutor", WatchingExecutor)
+    adapter = WindowsOcrAdapter("en-US")
+
+    adapter._get_executor()
+
+    assert created[0]["max_workers"] == 1
+    assert created[0]["initializer"] is start_parent_watchdog
+    assert created[0]["initargs"] == (windows_ocr.os.getpid(),)
 
 
 def test_windows_ocr_limits_images_to_native_maximum_dimension():
