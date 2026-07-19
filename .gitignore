@@ -57,6 +57,7 @@ erro tradução/
 exemplos do OCR/
 *.tmp
 *.temp
+docs
 
 # Local OCR benchmark data and generated reports
 bridge/benchmark/data/
