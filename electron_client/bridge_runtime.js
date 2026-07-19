@@ -2,11 +2,15 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn: spawnProcess } = require('child_process');
+const {
+    spawn: spawnProcess,
+    spawnSync: spawnProcessSync
+} = require('child_process');
 
 const DEFAULT_READY_URL = 'http://127.0.0.1:8765/ready';
 const STARTUP_PROBE_TIMEOUT_MS = 650;
 const MAX_BUFFERED_LOG_CHARS = 8192;
+const PROCESS_TREE_STOP_TIMEOUT_MS = 5000;
 
 function resolveBridgeLaunch(options = {}) {
     const baseDir = options.baseDir;
@@ -354,33 +358,36 @@ function forwardProcessOutput(stream, onLine) {
     });
 }
 
-function terminateOwnedProcess(child, platform = process.platform) {
+function terminateOwnedProcess(
+    child,
+    platform = process.platform,
+    spawnSyncImpl = spawnProcessSync
+) {
     if (platform !== 'win32' || !Number.isInteger(child?.pid)) {
         safeKill(child);
         return;
     }
 
-    let killer;
+    let result;
     try {
-        killer = spawnProcess(
+        // Electron does not wait for asynchronous cleanup during will-quit.
+        result = spawnSyncImpl(
             'taskkill',
             ['/pid', String(child.pid), '/T', '/F'],
             {
                 shell: false,
                 windowsHide: true,
-                stdio: 'ignore'
+                stdio: 'ignore',
+                timeout: PROCESS_TREE_STOP_TIMEOUT_MS
             }
         );
     } catch {
         safeKill(child);
         return;
     }
-    killer.once('error', () => safeKill(child));
-    killer.once('exit', code => {
-        if (code !== 0) {
-            safeKill(child);
-        }
-    });
+    if (result?.error || result?.status !== 0) {
+        safeKill(child);
+    }
 }
 
 function safeKill(child) {

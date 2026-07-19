@@ -4,7 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const path = require('node:path');
-const { BridgeRuntime, resolveBridgeLaunch } = require('./bridge_runtime');
+const {
+    BridgeRuntime,
+    resolveBridgeLaunch,
+    terminateOwnedProcess
+} = require('./bridge_runtime');
 
 const silentLogger = {
     info() {},
@@ -141,7 +145,35 @@ test('starts the local bridge and reports warming while its port opens', async (
     assert.equal(spawnCalls[0].options.env.PYTHONUNBUFFERED, '1');
 
     runtime.stop();
+    runtime.stop();
     assert.deepEqual(terminated, [{ processToStop: child, platform: 'win32' }]);
+});
+
+test('waits for the owned Windows process tree to terminate', () => {
+    const child = fakeChild(7654);
+    const calls = [];
+
+    terminateOwnedProcess(child, 'win32', (command, args, options) => {
+        calls.push({ command, args, options });
+        return { status: 0 };
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, 'taskkill');
+    assert.deepEqual(calls[0].args, ['/pid', '7654', '/T', '/F']);
+    assert.equal(calls[0].options.shell, false);
+    assert.equal(calls[0].options.windowsHide, true);
+    assert.equal(calls[0].options.stdio, 'ignore');
+    assert.equal(calls[0].options.timeout, 5000);
+    assert.equal(child.killed, false);
+});
+
+test('falls back to killing the bridge parent when taskkill fails', () => {
+    const child = fakeChild(8765);
+
+    terminateOwnedProcess(child, 'win32', () => ({ status: 1 }));
+
+    assert.equal(child.killed, true);
 });
 
 test('does not terminate a manually started bridge when Electron exits', async () => {
