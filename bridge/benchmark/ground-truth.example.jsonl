@@ -1,0 +1,2 @@
+{"id":"sample-001","image":"data/ground-truth-images/sample-001.png","text":"Looking through your brother's letters","language":"en","category":"pixel-art","split":"test","sequence":null,"frameIndex":null,"sha256":"replace-with-image-sha256"}
+{"id":"sample-002","image":"data/ground-truth-images/sample-002.png","text":"The camera is still moving behind this subtitle.","language":"en","category":"cenario-em-movimento","split":"test","sequence":"subtitle-001","frameIndex":1,"sha256":"replace-with-image-sha256"}

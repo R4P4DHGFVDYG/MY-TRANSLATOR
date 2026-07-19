@@ -58,6 +58,10 @@ exemplos do OCR/
 *.tmp
 *.temp
 
+# Local OCR benchmark data and generated reports
+bridge/benchmark/data/
+bridge/benchmark/results/
+
 # Local tools and agent metadata
 .hermes/
 .codex/
