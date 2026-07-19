@@ -622,6 +622,13 @@ function createSettingsWindow() {
     hardenWindow(settingsWindow);
     settingsWindow.center();
 
+    settingsWindow.on('close', event => {
+        if (isQuitting) {
+            return;
+        }
+        event.preventDefault();
+        app.quit();
+    });
     settingsWindow.on('closed', () => {
         settingsWindow = null;
         settingsReady = false;

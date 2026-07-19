@@ -73,6 +73,24 @@ test('continuous capture isolates late work from a newer area', () => {
     );
 });
 
+test('closing the settings window always requests a full application shutdown', () => {
+    const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+    const createSettingsSource = mainSource.match(
+        /function createSettingsWindow[\s\S]*?function showSettingsWindow/
+    )?.[0] || '';
+    const quitSource = mainSource.match(
+        /app\.on\('will-quit'[\s\S]*?app\.on\('window-all-closed'/
+    )?.[0] || '';
+
+    assert.match(
+        createSettingsSource,
+        /settingsWindow\.on\('close',\s*event\s*=>\s*{[\s\S]*?event\.preventDefault\(\);[\s\S]*?app\.quit\(\);/
+    );
+    assert.match(quitSource, /stopSideMouseShortcut\(\)/);
+    assert.match(quitSource, /screenCaptureRuntime\.stop\(\)/);
+    assert.match(quitSource, /bridgeRuntime\.stop\(\)/);
+});
+
 test('capture worker requests a low-rate stream and ignores an ended old stream', () => {
     const workerSource = fs.readFileSync(path.join(__dirname, 'capture_worker.js'), 'utf8');
 
